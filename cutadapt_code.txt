@@ -1,0 +1,18 @@
+cd Desktop/eDNA_wetlands_12S/data/raw_seqs
+
+find . -type f -name '*_R1_001.fastq.gz' | cut -f1 -d "R" > samples
+
+for sample in $(cat samples)
+do
+
+echo "On sample: $sample"
+
+  py -m cutadapt -a ^ACTGGGATTAGATACCCC...CTAGAGGAGCCTGTTCTA \
+  -A ^TAGAACAGGCTCCTCTAG...GGGGTATCTAATCCCAGT \
+  -m 50 -M 550 --discard-untrimmed \
+  -o ${sample}R1_001_trimmed.fastq.gz \
+  -p ${sample}R2_001_trimmed.fastq.gz \
+  ${sample}R1_001.fastq.gz \
+  ${sample}R2_001.fastq.gz >> Cutadapt_trimming_stats.txt 2>&1
+
+done
