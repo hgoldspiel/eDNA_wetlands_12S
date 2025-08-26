@@ -79,6 +79,14 @@ metadata.samples <- read_excel("metadata/Metadata for Bioinformatics.xlsx", 2,
                                col_types = c(rep("text", 6), "date", "date", rep("numeric", 3),
                                              "text", "text", "date", "text", "text", "numeric",
                                              "text", "text", "text", rep("numeric", 14)))
+metadata.sites <- read_excel("metadata/Site_data_2023.xlsx",
+                             col_types = c(rep("text",3), rep("numeric", 4), "text", "numeric",
+                                           rep("text", 4), "date", rep("numeric", 4), 
+                                           rep("text", 4)))
+# make wetland type variable two classes (ephemeral, semi/permanent)
+metadata.sites$Wetland_type2 <- metadata.sites$Wetland_type
+metadata.sites$Wetland_type2[metadata.sites$Wetland_type2 %in% 
+                               c("Semipermanent", "Permanent")] <- "Semi/permanent"
 
 # classify samples and runs
 metadata.samples$sample_type <- "Sample"
@@ -89,6 +97,8 @@ metadata.samples$sample_type[metadata.samples$Tube_ID %in% c("Riaz-Mock-1", "Ria
 
 # join up the modified sample metadata with the run metadata
 metadata.runs <- left_join(metadata.runs, metadata.samples, by = "Tube_ID")
+# join site-level data to samples
+metadata.runs <- left_join(metadata.runs, metadata.sites, by = c("Site" = "SiteID"))
 
 # 3. CHECK SEQUENCE QUALITY ---------------------------
 ## 1. Review a few random samples for sequencing quality.   
@@ -96,8 +106,8 @@ metadata.runs <- left_join(metadata.runs, metadata.samples, by = "Tube_ID")
 # The green line is the average quality score for all sequences in that sample, 
 # the black/grey are relative abundance of that score at each base.
 
-plotQualityProfile(fnsF[1]) # pretty great until 140
-plotQualityProfile(fnsR[1]) # about the same, great until 140
+plotQualityProfile(fnsF[1]) # pretty great until 110
+plotQualityProfile(fnsR[1]) # about the same, great until 110
 
 ## 2.  Look at the whole dataset to aggregate all samples onto one graph. 
 ### forward reads
@@ -116,7 +126,8 @@ reads.sum.r <- max(qual.plot.r$data$Cycle)
 
 # save figure
 ggarrange(qual.plot.f, qual.plot.r,
-          nrow = 2, ncol = 1)
+          nrow = 2, ncol = 1,
+          labels = c("A", "B"))
 ggsave("figures/read.quality.jpg", width = 8, height = 12, units = "in", dpi = 300) 
 
 ### Summary of quality 
@@ -463,7 +474,7 @@ seqtab.decontam.reads.df$sample <- rownames(seqtab.decontam.reads.df)
 seqtab.decontam.ASVs.df$sample <- rownames(seqtab.decontam.ASVs.df)
 track <- left_join(track, seqtab.decontam.reads.df, by = "sample")
 track <- left_join(track, seqtab.decontam.ASVs.df, by = "sample")
-track$sample_type <- factor(track.df$sample_type, 
+track$sample_type <- factor(track$sample_type, 
                                levels = c("Sample", "Mock", "Field blank", 
                                           "PCR blank", "Qiagen blank"))
 track[is.na(track)] <- 0
@@ -623,7 +634,7 @@ local.blast <- function() {
             '-perc_identity','97',
             '-max_target_seqs', '6',
             '-query', "C:/Users/harrison.goldspiel/Desktop/eDNA_wetlands_12S/data/results/ASV_sequences.fasta",
-            '-out', 'C:/Users/harrison.goldspiel/Desktop/eDNA_wetladns_12S/data/results/blast.txt'),
+            '-out', 'C:/Users/harrison.goldspiel/Desktop/eDNA_wetlands_12S/data/results/blast.txt'),
   wait = TRUE,
   stdout = TRUE  # capture the output in a character vector
   )
@@ -683,7 +694,7 @@ blt <- blt %>%
 
 # append the new, reliable BLASTed taxonomy data to the existing custom list
 # make new copy without the NCBI taxonomy codes
-assign.tax.list <- sapply(all.taxa.custom.edited, function(x) x[1]) 
+assign.tax.list <- all.taxa.custom.edited$tax
 blt.valid <- blt # new copy to populate only with accurate and relevant matches
 names(assign.tax.list) <- substring(names(assign.tax.list), 1, nchar(names(assign.tax.list))-4)
 # remove the tax ID from the original list
@@ -738,21 +749,195 @@ final.tax.list$Genus <- ifelse(is.na(final.tax.list$Genus.y),
 final.tax.list$Species <- ifelse(is.na(final.tax.list$Species.y),
                                  final.tax.list$Species.x,
                                  final.tax.list$Species.y)
-# export the final assignments
+# save the final assignments
 final.tax.list <- final.tax.list[,c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")]
+saveRDS(final.tax.list, 'data/results/spp_assign_final_wetlands_2023.rsd') 
+
+# Examine species data prior to and after decontamination
+spptab.nochim <- seqtab.nochim
+colnames(spptab.nochim) <- final.tax.list[,"Species"][match(colnames(spptab.nochim), 
+                                                              rownames(final.tax.list))]
+spptab.decontam <- seqtab.decontam
+colnames(spptab.decontam) <- final.tax.list[,"Species"][match(colnames(spptab.decontam), 
+                                                              rownames(final.tax.list))]
+
+# 11. CREATE PHYLOSEQ OBJECTS ------------------------------
+
+# create phyloseq objects
+samples <- sample_data(as.data.frame(metadata.runs))
+row.names(samples) <- metadata.runs$ReadFile_Name
+
+ps.dat <- phyloseq(otu_table(as.matrix(seqtab.decontam), taxa_are_rows=FALSE), 
+                   sample_data(samples),
+                   tax_table(as.matrix(final.tax.list)))
+# change taxa names
+taxa_names(ps.dat) <- paste0("Seq", seq(ntaxa(ps.dat)))
+
+## create a phyloseq object with only field samples
+ps.dat.samps <- subset_samples(ps.dat, sample_type == "Sample")
+
+# examine raw phyloseq objects
+ps.dat
+ps.dat.samps
+
+saveRDS(ps.dat.samps, 'data/results/phyloseq_data_samples_wetlands_2023.rsd') 
+
+# 12. SUMMARY STATS OF ASVs AND READS ---------
+# get second dataset for just taxonomically-verified ASVs from each assay
+final.tax.list.valid <- final.tax.list
+final.tax.list.valid <- final.tax.list.valid[final.tax.list.valid$Phylum == "Chordata" &
+                                    !is.na(final.tax.list.valid$Phylum),]
+
+# Create table to populate proportions of ASVs assigned to higher and lower taxa
+tax.assign.props <- data.frame(Kingdom = NA,
+                               Phylum = NA,
+                               Class = NA,
+                               Order = NA,
+                               Family = NA, 
+                               Genus = NA,
+                               Species = NA)
+
+# make a copy of table to get proportions of validated taxa from each assay
+tax.assign.props.valid <- tax.assign.props
+
+# populate table through nested for loop
+for(level in c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")) {
+  tax.assign.props[,level] = 
+    sum(!is.na(final.tax.list[,level]))/nrow(final.tax.list)
+  tax.assign.props.valid[,level] = 
+    sum(!is.na(final.tax.list.valid[,level]))/nrow(final.tax.list)
+}
 
 
-## IDEAS FOR ANALYSIS / MANUSCRIPTS
-### 1. eDNA vs relative abundance with traditional monitoring methods (cameras, egg mass counts, trapping)
-#### cluster analysis to compare communities detected from either method
-#### paired bar plots comparing species reads vs number of detections (something quantitative and z-scored)
-#### compare simple summary of richness from either method
-#### regression relating reads vs camera detections
+# melt table for plotting summary of assignment success for ASVs
+## all sequences
+tax.assign.melt <- melt(tax.assign.props, 
+                        variable.name = "Level", 
+                        value.name = "Prop_ASVs") 
 
-### 2. Landscape occupancy study of the complex
-#### using qPCR assay (if it works)
-#### using metabarcoding data
-#### using Jake's data
-#### New York FL data?
+## verified sequences
+tax.assign.melt.valid <- melt(tax.assign.props.valid, 
+                              variable.name = "Level", 
+                              value.name = "Prop_ASVs_valid")
+
+tax.assign.melt$Prop_ASVs_valid <- tax.assign.melt.valid$Prop_ASVs_valid 
+tax.assign.melt <- tax.assign.melt[-1,]
+
+# plot taxonomic assignment success 
+ASV.props <- ggplot(tax.assign.melt, aes(Level, Prop_ASVs)) +
+  geom_col(fill = "grey") +
+  geom_col(aes(Level, Prop_ASVs_valid), fill = "black", width = 0.25) +
+  labs(x = "Taxonomic level", y = "Proportion of ASVs") +
+  ylim(c(0,1)) +
+  theme_bw() + mythemes +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.4),
+        legend.position = "none")
+
+ASV.props
+
+# save plot
+ggsave("figures/ASVs.prop.assigned.jpg", 
+       width = 8, height = 6, units = "in", dpi = 300)
+
+# let's do the same as above, but for total reads instead of ASVs
+## create output tables for proportions of reads
+reads.assign.props <- data.frame(Kingdom = NA,
+                                 Phylum = NA,
+                                 Class = NA,
+                                 Order = NA,
+                                 Family = NA, 
+                                 Genus = NA,
+                                 Species = NA)
+
+reads.assign.props.valid <- reads.assign.props
+
+# populate proportion tables
+ps.dat.melt <- psmelt(ps.dat)
+ps.dat.melt.valid <- ps.dat.melt
+# validation by assay-specific taxonomy
+ps.dat.melt.valid <- ps.dat.melt.valid[ps.dat.melt.valid$Phylum == "Chordata",]
+# calculate proportion of reads for each taxonomic level
+for(level in c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")) {
+      reads.assign.props[,level] = 
+        sum(ps.dat.melt$Abundance[!is.na(ps.dat.melt[,level])])/sum(ps.dat.melt$Abundance)
+      reads.assign.props.valid[,level] = 
+        sum(ps.dat.melt.valid$Abundance[!is.na(ps.dat.melt.valid[,level])])/sum(ps.dat.melt$Abundance)
+}
+
+# melt for plotting
+reads.assign.melt <- melt(reads.assign.props, 
+                          variable.name = "Level", 
+                          value.name = "Prop_reads")
+
+reads.assign.melt.valid <- melt(reads.assign.props.valid, 
+                                variable.name = "Level", 
+                                value.name = "Prop_reads_valid") 
+
+reads.assign.melt$Prop_reads_valid <- reads.assign.melt.valid$Prop_reads_valid
+reads.assign.melt <- reads.assign.melt[-1,]
+
+# plot taxonomic assignment success (by reads) 
+reads.props <- ggplot(reads.assign.melt, aes(Level, Prop_reads)) +
+  geom_col(fill = "grey") +
+  geom_col(aes(Level, Prop_reads_valid), fill = "black", width = 0.25) +
+  labs(x = "Taxonomic level", y = "Proportion of reads") +
+  ylim(c(0,1)) +
+  theme_bw() + mythemes +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.4),
+        legend.position = "none")
+
+reads.props
+
+# save plot
+ggsave("figures/Reads.prop.assigned.jpg", 
+       width = 8, height = 6, units = "in", dpi = 300)
+
+# combine ASV and reads plot
+ggarrange(ASV.props + theme(axis.text.x = element_blank(), axis.title.x = element_blank()), 
+          reads.props,
+          nrow = 2, labels = c("A", "B"), heights = c(0.45,0.55))
+
+# save plot
+ggsave("figures/ASV.reads.prop.assigned.jpg", 
+       width = 8, height = 10, units = "in", dpi = 300)
+
+# how many sequences have no taxonomic information at all
+final.tax.list %>%
+    filter(if_all(everything(), is.na)) %>%
+    nrow() / nrow(final.tax.list)
+
+# how many reads have no taxonomic information at all
+psmelt(ps.dat) %>%
+      filter(if_all(c(Kingdom, Phylum, Class, Order, Family, Species), is.na)) %>%
+      summarize(prop.unknown = sum(Abundance) / sum(psmelt(ps.dat)$Abundance)) 
+
+# prop of assigned ASVs that were assigned to target taxa
+tax.assign.correct <- as.matrix(tax.assign.props.valid) / as.matrix(tax.assign.props)
+min(tax.assign.correct, na.rm = T)
+
+# prop of assigned reads that were assigned to target taxa
+reads.assign.correct <- as.matrix(reads.assign.props.valid) / as.matrix(reads.assign.props)
+min(reads.assign.correct, na.rm = T)
+
+# Contamination review
+Riaz.blanks <- metadata.runs$ReadFile_Name[metadata.runs$sample_type %in% c("Field blank", 
+                                                                              "Qiagen blank", 
+                                                                              "PCR blank")]
+View(spptab.nochim[Riaz.blanks,])
+
+## prop of reads in raw data that were cow
+cows.12s <- which(tax_table(ps.dat)[,"Genus"] %in% "Bos")
+sum(seqtab.nochim[,cows.12s])/sum(seqtab.nochim)
+
+## prop of reads in raw data that are human
+human.12s <- which(tax_table(ps.dat)[,"Genus"] %in% "Homo")
+sum(seqtab.nochim[,human.12s])/sum(seqtab.nochim)
+
+# prop of reads in raw data that were "contaminants" and filtered out
+(sum(seqtab.nochim) - sum(seqtab.decontam)) / (sum(seqtab.nochim))
+
+
+
+
 
 
