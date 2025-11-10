@@ -88,6 +88,11 @@ metadata.sites$Wetland_type2 <- metadata.sites$Wetland_type
 metadata.sites$Wetland_type2[metadata.sites$Wetland_type2 %in% 
                                c("Semipermanent", "Permanent")] <- "Semi/permanent"
 
+# impute missing pH value for one sample
+metadata.samples$pH[metadata.samples$Tube_ID == "UFTS27-S-1"] <- 
+  mean(na.omit(metadata.samples$pH[
+    metadata.samples$Site == "UFTS27"]))
+
 # classify samples and runs
 metadata.samples$sample_type <- "Sample"
 metadata.samples$sample_type[metadata.samples$Location == "B"] <- "Field blank"
@@ -762,7 +767,7 @@ colnames(spptab.decontam) <- final.tax.list[,"Species"][match(colnames(spptab.de
                                                               rownames(final.tax.list))]
 
 # 11. CREATE PHYLOSEQ OBJECTS ------------------------------
-
+final.tax.list <- readRDS('data/results/spp_assign_final_wetlands_2023.rsd')
 # create phyloseq objects
 samples <- sample_data(as.data.frame(metadata.runs))
 row.names(samples) <- metadata.runs$ReadFile_Name
@@ -775,6 +780,13 @@ taxa_names(ps.dat) <- paste0("Seq", seq(ntaxa(ps.dat)))
 
 ## create a phyloseq object with only field samples
 ps.dat.samps <- subset_samples(ps.dat, sample_type == "Sample")
+
+## create a principle component for water quality variables (Cond, DO, Sal, Temp, pH)
+pairs(data.frame(sample_data(ps.dat.samps)[,c(13,31,34,37,38)]))
+wetland.wq.pc <- prcomp(sample_data(ps.dat.samps)[,c(13,31,34,37,38)], center = TRUE, scale. = TRUE)
+summary(wetland.wq.pc) # first PC is < 0.4
+wetland.wq.pc
+
 
 # examine raw phyloseq objects
 ps.dat
@@ -936,7 +948,9 @@ sum(seqtab.nochim[,human.12s])/sum(seqtab.nochim)
 # prop of reads in raw data that were "contaminants" and filtered out
 (sum(seqtab.nochim) - sum(seqtab.decontam)) / (sum(seqtab.nochim))
 
-
+# order cleaned samples by sequencing depth
+sort(rowSums(otu_table(ps.dat.samps)))
+## HG089 (FS-S-N-4) has over 200,000 cycles, >100K greater than all other samples
 
 
 

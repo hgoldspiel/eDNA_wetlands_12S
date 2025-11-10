@@ -316,3 +316,6 @@ sample.data.frame <- function(ps) {
     o <- attr(Q, "pivot")
     t(center + scale * t(Circle %*% Q[,o]))
 }
+
+# make binary function
+makebinary <- function(x) {ifelse(x > 0, 1, 0)}
