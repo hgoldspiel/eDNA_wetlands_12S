@@ -355,10 +355,11 @@ amma_data$Reads_per_ml_m3 <- amma_data$Reads_per_ml / amma_data$Wetland_vol_m3
 amma_data$Reads_per_ml_m3_norm <- amma_data$Reads_per_ml_norm / amma_data$Wetland_vol_m3
 
 # relationship, uncorrected
-ggplot(amma_data, aes(AMMA_eggs, Reads)) +
+(raw.amma.egg.cor <- ggplot(amma_data, aes(AMMA_eggs, Reads)) +
   geom_point() +
-  geom_smooth(method = "lm") +
-  theme_classic() + mythemes
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() + mythemes +
+  labs(x = "Salamander egg masses", y = "Salamander eDNA read count"))
 
 # relationship, corrected for vol
 ggplot(amma_data, aes(AMMA_eggs_per_m2, Reads_per_ml_m3)) +
@@ -367,7 +368,7 @@ ggplot(amma_data, aes(AMMA_eggs_per_m2, Reads_per_ml_m3)) +
   theme_classic() + mythemes
 
 # relationship, corrected for vol, log transformed data (check that its kosher)
-ggplot(amma_data, aes(log(AMMA_eggs_per_m2+1), log(Reads_per_ml_m3+1))) +
+ggplot(amma_data, aes(log(AMMA_eggs_per_m2), log(Reads_per_ml_m3+1))) +
   geom_point() +
   geom_smooth(method = "lm") +
   theme_classic() + mythemes
@@ -381,10 +382,17 @@ ggplot(amma_data, aes(AMMA_eggs_per_m2, Reads_per_ml_m3, color = Hatch)) +
   theme_classic() + mythemes
 
 # log transformed reads
-ggplot(amma_data, aes(log(AMMA_eggs_per_m2+1), log(Reads_per_ml_m3+1), color = Hatch)) +
+ggplot(amma_data, aes(log(AMMA_eggs_per_m2), log(Reads_per_ml_m3+1), color = Hatch)) +
   geom_point() +
   geom_smooth(method = "lm") +
   theme_classic() + mythemes
+
+# eDNA vs date
+(raw.amma.date.cor <- ggplot(amma_data, aes(DOY, Reads)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() + mythemes +
+  labs(x = "DOY", y = "Salamander eDNA read count"))
 
 # gamm to account for nonlinear effects of time of eDNA sample
 library(mgcv)
@@ -418,8 +426,8 @@ null_eDNA_gamm <-
 
 library(bbmle)
 AICtab(eggXdate_eDNA_gamm, egg_eDNA_gamm, date_eDNA_gamm, null_eDNA_gamm)
-
 # looks like DOY is stronger influence on read counts than egg mass counts
+
 summary(eggXdate_eDNA_gamm) # barely significant interaction term
 
 # pred vs observed reads
@@ -462,25 +470,28 @@ library(lme4)
 hist(amma_data$Reads_per_ml_m3, prob = T); 
 lines(density(amma_data$Reads_per_ml_m3), col = "blue", lwd = 2)
 
+hist(sqrt(amma_data$Reads_per_ml_m3), prob = T); 
+lines(density(sqrt(amma_data$Reads_per_ml_m3)), col = "blue", lwd = 2)
+
 hist(log(amma_data$Reads_per_ml_m3+1), prob = T); 
 lines(density(log(amma_data$Reads_per_ml_m3 + 1)), col = "blue", lwd = 2)
 
-# seems like a gamma or lognormal distribution, could also log Reads_per_ml_m3 or sqrt transform reads
+# seems like some transformation would be helpful
 # this paper used log transformation on reads for validating amphibian eDNA surveys 
 # https://besjournals.onlinelibrary.wiley.com/doi/pdfdirect/10.1111/1365-2656.13468
-lmer.full <- lmer(log(Reads_per_ml_m3+1) ~ 
-                    scale(log(AMMA_eggs_per_m2+1)) * scale(DOY) + (1|Site), 
+lmer.full <- lmer(sqrt(Reads_per_ml_m3) ~ 
+                    AMMA_eggs_per_m2 * DOY + (1|Site), 
                   data = amma_data)
-lmer.add <- lmer(log(Reads_per_ml_m3+1) ~ 
-                   scale(log(AMMA_eggs_per_m2+1)) + scale(DOY) + (1|Site), 
+lmer.add <- lmer(sqrt(Reads_per_ml_m3) ~ 
+                   AMMA_eggs_per_m2 + DOY + (1|Site), 
                  data = amma_data)
-lmer.eggs <- lmer(log(Reads_per_ml_m3+1) ~ 
-                    scale(log(AMMA_eggs_per_m2+1)) + (1|Site), 
+lmer.eggs <- lmer(sqrt(Reads_per_ml_m3) ~ 
+                    AMMA_eggs_per_m2 + (1|Site), 
                   data = amma_data)
-lmer.DOY <- lmer(log(Reads_per_ml_m3+1) ~ 
-                    scale(DOY) + (1|Site), 
+lmer.DOY <- lmer(sqrt(Reads_per_ml_m3) ~ 
+                    DOY + (1|Site), 
                   data = amma_data)
-lmer.null <- lmer(log(Reads_per_ml_m3+1) ~ 1 + (1|Site), 
+lmer.null <- lmer(sqrt(Reads_per_ml_m3) ~ 1 + (1|Site), 
                   data = amma_data)
 
 library(performance)
@@ -497,6 +508,53 @@ egg.date.pred <- as.data.frame(predict(lmer.add, re.form= NA,
 egg.date.pred <- cbind(pred.grads, egg.date.pred)
 
 library(scico)
+lmer.pred.eggs.eDNA <- ggplot(egg.date.pred, aes(x = AMMA_eggs_per_m2, y = DOY, z = fit)) +
+  geom_raster(aes(fill = fit), interpolate = TRUE) +
+  geom_contour(colour = "white") + 
+  geom_point(data = amma_data, inherit.aes = FALSE, 
+             aes(x = AMMA_eggs_per_m2, y = DOY), shape = "+", 
+             color = "grey", size = 4) +
+  scale_fill_scico(palette = 'davos') +
+  theme_bw() + mythemes +
+  labs(x = "Salamander egg masses / m2") +
+  scale_x_continuous(expand = c(0,0)) + 
+  scale_y_continuous(expand = c(0,0)) +
+  guides(fill = guide_colorbar(title = "sqrt(Reads/ml/m3)"))
+
+lmer.pred.eggs.eDNA
+
+# glmer with lognormal distribution
+glmer.full <- glmer(Reads_per_ml_m3+1 ~ 
+                     scale(AMMA_eggs_per_m2) * scale(DOY) + (1|Site), 
+                   family = gaussian(link = "log"),
+                   data = amma_data)
+glmer.add <- glmer(Reads_per_ml_m3+1 ~ 
+                      scale(AMMA_eggs_per_m2) + scale(DOY) + (1|Site), 
+                    family = gaussian(link = "log"),
+                    data = amma_data)
+glmer.eggs <- glmer(Reads_per_ml_m3+1 ~ 
+                     scale(AMMA_eggs_per_m2) + (1|Site), 
+                   family = gaussian(link = "log"),
+                   data = amma_data)
+glmer.DOY <- glmer(Reads_per_ml_m3+1 ~ 
+                    scale(DOY) + (1|Site), 
+                  family = gaussian(link = "log"),
+                  data = amma_data)
+glmer.null <- glmer(Reads_per_ml_m3+1 ~ 1 + (1|Site), 
+                   family = gaussian(link = "log"),
+                   data = amma_data)
+
+AICtab(glmer.full, glmer.add, glmer.eggs, glmer.DOY, glmer.null)
+anova(glmer.full, glmer.add)
+summary(glmer.full)
+summary(glmer.add)
+
+## let's create prediction surfaces 
+egg.date.pred <- as.data.frame(predict(glmer.full, re.form= NA,
+                                       newdata = pred.grads, se.fit = TRUE))
+
+egg.date.pred <- cbind(pred.grads, egg.date.pred)
+
 ggplot(egg.date.pred, aes(x = AMMA_eggs_per_m2, y = DOY, z = fit)) +
   geom_raster(aes(fill = fit), interpolate = TRUE) +
   geom_contour(colour = "white") + 
@@ -505,44 +563,20 @@ ggplot(egg.date.pred, aes(x = AMMA_eggs_per_m2, y = DOY, z = fit)) +
              color = "grey", size = 4) +
   scale_fill_scico(palette = 'davos') +
   theme_bw() + mythemes +
+  labs(x = "Salamander egg masses / m2") +
   scale_x_continuous(expand = c(0,0)) + 
   scale_y_continuous(expand = c(0,0)) +
   guides(fill = guide_colorbar(title = "log(Reads/ml/m3)"))
 
-# Extract start value estimates from the null lmer
-fixef_start <- fixef(lmer.null)
-theta_start <- as.numeric(getME(lmer.null, "theta"))
+# combine some plots for sharing
+ggarrange(ggarrange(raw.amma.egg.cor + ylab("eDNA abundance") + xlab("Egg masses") +
+                      theme(plot.margin=unit(c(0,1,0,1), 'cm')), 
+                    raw.amma.date.cor + ylab("eDNA abundance") +
+                      theme(plot.margin=unit(c(0,1,0,1), 'cm')), labels = c("A", "B")),
+          lmer.pred.eggs.eDNA, nrow = 2, labels = c("", "C"))
 
-# glmer with lognormal distribution (can't find starting values!)
-# running with Gamma function causes RStudio to crash...
-glmer.full <- glmer(Reads_per_ml_m3 ~ 
-                     scale(AMMA_eggs_per_m2) * scale(DOY) + (1|Site), 
-                   family = gaussian(link = "log"),
-                   start = list(fixef = fixef_start, theta = theta_start),
-                   data = amma_data)
-glmer.add <- glmer(Reads_per_ml_m3 ~ 
-                      scale(AMMA_eggs_per_m2) + scale(DOY) + (1|Site), 
-                    family = gaussian(link = "log"),
-                    start = list(fixef = fixef_start, theta = theta_start),
-                    data = amma_data)
-glmer.eggs <- glmer(Reads_per_ml_m3 ~ 
-                     scale(AMMA_eggs_per_m2) + (1|Site), 
-                   family = gaussian(link = "log"),
-                   start = list(fixef = fixef_start, theta = theta_start),
-                   data = amma_data)
-glmer.DOY <- glmer(Reads_per_ml_m3 ~ 
-                    scale(DOY) + (1|Site), 
-                  family = gaussian(link = "log"),
-                  start = list(fixef = fixef_start, theta = theta_start),
-                  data = amma_data)
-glmer.null <- glmer(Reads_per_ml_m3 ~ 1 + (1|Site), 
-                   family = gaussian(link = "log"),
-                   start = list(fixef = fixef_start, theta = theta_start),
-                   control=glmerControl(optimizer="bobyqa", optCtrl=list(maxfun=100000)),
-                   data = amma_data)
-
-AICtab(glmer.full, glmer.add, glmer.eggs, glmer.DOY, glmer.null)
-
+ggsave("figures/egg.mass.validation.jpg", 
+       width = 9, height = 7, units = "in", dpi = 300)
 
 ### 7a-2. eDNA vs trapping ----
 #### load trapping data ----
@@ -840,6 +874,26 @@ for(variable in c("Method", "Date")) {
 occu.plots.univar$Method$Plot
 occu.plots.univar$Date$Plot
 
+# get new labels for species for plotting
+spp_names <- list(
+  'AMMA'="Spotted salamander",
+  'AMLA'="Blue-spotted salamander",
+  'AMBY'="Unisexual salamander",
+  'LISY'="Wood frog"
+)
+
+# make function for overriding labels
+spp_labeller <- function(variable,value){
+  return(spp_names[value])
+}
+
+# update figure without editing data
+amph.method.det <- occu.plots.univar$Method$Plot + facet_wrap(~Species, labeller=spp_labeller)
+amph.method.det
+ggsave("figures/trapping.validation.jpg", 
+       width = 9, height = 7, units = "in", dpi = 300)
+
+
 # build cumulative detection functions from additive models
 
 # From a probability of detection, the rarefaction curve is just
@@ -878,95 +932,202 @@ for(spp in names(occu_mod_outputs)) {
 
 curve_data$Method <- factor(curve_data$Method, levels = c("Trapping", "eDNA"))
 
-ggplot(curve_data, aes(x = x, y = y, color = Method)) +
+(amph.method.det.curve <- ggplot(curve_data, aes(x = x, y = y, color = Method)) +
   geom_errorbar(aes(ymin = ymin, ymax = ymax), width = 0.3) +
   geom_point(size = 2) +
   geom_line() +
   scale_color_manual(values = col2[1:2]) +
   scale_x_continuous(breaks = c(1:10)) +
   facet_wrap(~Species) +
-  labs(x = "Sampling units (eDNA samples, trapping occasions)", y = "Cumulative detection prob.") +
-  theme_bw() + mythemes
+  labs(x = "Sampling units (eDNA samples, trapping nights)", y = "Cumulative detection prob.") +
+  theme_bw() + mythemes)
+
+amph.method.det.curve + facet_wrap(~Species, labeller=spp_labeller)
+ggsave("figures/trapping.validation.curve.jpg", 
+       width = 9, height = 7, units = "in", dpi = 300)
 
 ### 7a-3. eDNA vs cameras ----
-
+#### load and combine eDNA and camera datasets ----
 # import camera data
-cameras <- read.csv("data/camera_data_2025-10-27.csv")
+cameras <- read.csv("data/camera_data_2025-11-12.csv")
+cameras$Species.binom <- paste(cameras$Genus, cameras$Species.1)
 
-# add latin names
-library(taxize)
-library(taxizedb)
 # reformat and correct some species
-cameras$Species.Common.Name[cameras$Species.Common.Name == " Beaver"] <- "Beaver"
-cameras$Species.Common.Name[cameras$Species.Common.Name == "Opossum"] <- "Virginia opossum"
 camera.spp <- unique(cameras$Species.Common.Name)
 camera.spp <- camera.spp[camera.spp %notin% c("", "Unknown", "Unknown bird", "Unknown mammal", 
-                                              "Unknown amphibian", "Unknown reptile", "Other (comment)")]
-camera.scinames <- comm2sci(camera.spp)
-camera.tax.names <- data.frame(Common.Name = NULL, Sci.Name = NULL)
-for(i in names(camera.scinames)) {
-  temp <- data.frame(Com.Name = i,
-                     Sci.Name = ifelse(length(camera.scinames[[i]]) == 0, NA, 
-                                       camera.scinames[[i]]))
-  camera.tax.names <- bind_rows(camera.tax.names, temp)
+                                              "Unknown amphibian", "Unknown reptile", 
+                                              "Other (comment)")]
+
+library(data.table)
+# subset eDNA from camera sites, get average reads for each taxa frome each site on each occasion
+cameras.edna <- subset_samples(ps.tax.samps.spp, Cameras == "Yes") %>% psmelt()
+cameras.edna.agg <- cameras.edna %>% 
+  mutate(Site = ifelse(Site == "RW-Stream", "RW-S", Site),
+         Date_simple = format(Date, "%Y-%m-%d")) %>%
+  group_by(Site, Date_simple, OTU) %>%
+  summarize(Mean_reads = mean(Abundance),
+            DateTimeSurvey = max(Date)) %>% ungroup() %>%
+  group_by(Site) %>%
+  mutate(Occasion = frank(Date_simple, ties.method = "dense")) %>% ungroup() %>%
+  left_join(dplyr::select(cameras.edna, OTU, Class, Order, Family, Genus, Species),
+            by = "OTU", multiple = "first")
+
+# subset camera data that overlaps with eDNA surveys
+cameras.validation <- cameras %>%
+  filter(Date.Time <= max(cameras.edna$Date))
+
+# extract bird and mammal data from eDNA 
+cameras.edna.birds.mammals <- 
+  filter(cameras.edna.agg, Class %in% c("Aves", "Mammalia"))
+
+# make some post-hoc species assignments to both datasets
+cameras.validation <- cameras.validation %>%
+  mutate(Species.binom = case_when(Species.binom == "Canis familiaris" ~ "Canis lupus familiaris",
+                                   TRUE ~ Species.binom))
+
+cameras.edna.birds.mammals <- cameras.edna.birds.mammals %>%
+  mutate(Species = case_when(Species == "Canis lupus" ~ "Canis lupus familiaris",
+                             TRUE ~ Species))
+
+# combine monthly datasets of reads and camera trap detections ----
+## assign site-specific occasion variable to camera dataset
+camera.site.deployments <- as.POSIXct(c("2023-04-06 01:00:00",
+                                        "2023-04-05 01:00:00",
+                                        "2023-04-13 01:00:00",
+                                        "2023-03-31 01:00:00",
+                                        "2023-04-13 01:00:00",
+                                        "2023-04-05 01:00:00",
+                                        "2023-04-13 01:00:00",
+                                        "2023-04-05 01:00:00"),
+                                      format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+names(camera.site.deployments) <- c("FS", "SB", "HP", "RW", "RW-S", "UFTS1", "UFTS5", "UFTS42")
+
+cameras.validation$Occasion <- 1
+cameras.validation$Occasion.dur <- 1
+for(site in unique(cameras.edna.agg$Site)) {
+  occs <- seq(min(cameras.edna.agg$Occasion[cameras.edna.agg$Site == site]),
+              max(cameras.edna.agg$Occasion[cameras.edna.agg$Site == site]), 1)
+  dates <- unique(cameras.edna.agg$DateTimeSurvey[cameras.edna.agg$Site == site])
+  occ.dat <- data.frame(occ = occs,
+                        date1 = dates,
+                        date0 = lag(dates))
+  occ.dat$date0[is.na(occ.dat$date0)] <- camera.site.deployments[site]
+  occ.dat$dur <- as.integer(occ.dat$date1 - occ.dat$date0)
+  occ.find <- function(x) occ.dat$occ[x >= occ.dat$date0 & x < occ.dat$date1]
+  cameras.validation$Occasion[cameras.validation$Site.Name == site] <-
+    unlist(sapply(cameras.validation$Date.Time[cameras.validation$Site.Name == site], FUN = occ.find))
+  for(occ in 1:4) {
+    cameras.validation$Occasion.dur[cameras.validation$Site.Name == site &
+                                      cameras.validation$Occasion == occ] <-
+      occ.dat$dur[occ.dat$occ == occ]
+  }
 }
 
-# fill in some gaps for species
-camera.tax.names <- camera.tax.names %>%
-  mutate(Sci.Name = case_when(
-    Com.Name == "Spotted sandpiper" ~ "Actitus macularius",
-    Com.Name == "Bicknell's thrush" ~ "Catharus bicknelli" ,
-    Com.Name == "Barred owl" ~ "Strix varia",
-    Com.Name == "Grey fox" ~ "Urocyon cineroargenteus",
-    Com.Name == "Porcupine" ~ "Erethizon dorsatum",
-    Com.Name == "Eastern coyote" ~ "Canis latrans",
-    Com.Name == "Snowshoe hare" ~ "Lepus americanus",
-    Com.Name == "Deer mouse" ~ "Peromyscus sp.",
-    Com.Name == "Woodthrush" ~ "Hylocichla mustelina",
-    Com.Name == "Brown thrasher" ~ "Toxostoma rufum",
-    Com.Name == "Vesper's sparrow" ~ "Pooecetes gramineus",
-    Com.Name == "Winter wren" ~ 
-    TRUE ~ as.character(Sci.Name)))
-# add other taxonomy fields
-# join everything to full camera dataset
+## calculate relative abundance of detections for species in each site x occasion
+cameras.validation.agg <- cameras.validation %>%
+  filter(Family != "" & Attention.Needed.Flag == "false") %>% # omit empty or ambiguous images
+  mutate(Date = date(ymd_hms(Date.Time))) %>% # create day variable for daily counts
+  group_by(Site.Name, Occasion, Class, Order, Family, Genus, Species.binom) %>%
+  summarize(Total.images = n()/unique(Occasion.dur),
+            Total.images.water = sum(Contacting.water == "Yes")/unique(Occasion.dur),
+            Total.indiv = sum(Sighting.Quantity)/unique(Occasion.dur),
+            Total.indiv.water = sum(Sighting.Quantity[Contacting.water == "Yes"])/unique(Occasion.dur),
+            Total.days = length(unique(Date))/unique(Occasion.dur),
+            Total.days.water = length(unique(Date[Contacting.water == "Yes"]))/unique(Occasion.dur),
+            .groups = "rowwise") %>%
+  ungroup() %>%
+  dplyr::rename(Site = Site.Name,
+                Species = Species.binom)
 
-tax <- name2taxid(spp, out_type = "summary")
-blt$Kingdom <- NA
-blt$Phylum <- NA
-blt$Class <- NA
-blt$Order <- NA
-blt$Family <- NA
-blt$Genus <- NA
-blt$sscinames <- spp
-# for each unique blasted species, populate extra taxonomic classes from taxize
-for(i in 1:nrow(tax)) {
-  classes <- classification(tax$id[i])
-  blt[blt$sscinames == tax$name[i],"Kingdom"] <-
-    ifelse(length(classes[[1]]$name[classes[[1]]$rank == "kingdom"]) > 0,
-           classes[[1]]$name[classes[[1]]$rank == "kingdom"], NA)
-  blt[blt$sscinames == tax$name[i],"Phylum"] <-
-    ifelse(length(classes[[1]]$name[classes[[1]]$rank == "phylum"]) > 0,
-           classes[[1]]$name[classes[[1]]$rank == "phylum"], NA)
-  blt[blt$sscinames == tax$name[i],"Class"] <-
-    ifelse(length(classes[[1]]$name[classes[[1]]$rank == "class"]) > 0,
-           classes[[1]]$name[classes[[1]]$rank == "class"], NA)
-  blt[blt$sscinames == tax$name[i],"Order"] <-
-    ifelse(length(classes[[1]]$name[classes[[1]]$rank == "order"]) > 0,
-           classes[[1]]$name[classes[[1]]$rank == "order"], NA)
-  blt[blt$sscinames == tax$name[i],"Family"] <-
-    ifelse(length(classes[[1]]$name[classes[[1]]$rank == "family"]) > 0,
-           classes[[1]]$name[classes[[1]]$rank == "family"], NA)
-  blt[blt$sscinames == tax$name[i],"Genus"] <-
-    ifelse(length(classes[[1]]$name[classes[[1]]$rank == "genus"]) > 0,
-           classes[[1]]$name[classes[[1]]$rank == "genus"], NA)
-}
+## combine monthly eDNA and camera data into new data frame
+cameras.edna.combined <- full_join(cameras.edna.agg, cameras.validation.agg,
+                                   by = c("Site", "Occasion", "Class",
+                                          "Order", "Family", "Genus", "Species")) %>%
+  # fill in zeroes for either method missing data
+  mutate(Mean_reads = ifelse(is.na(Mean_reads), 0, Mean_reads),
+         Total.images = ifelse(is.na(Total.images), 0, Total.images),
+         Total.images.water = ifelse(is.na(Total.images.water), 0, Total.images.water),
+         Total.indiv = ifelse(is.na(Total.indiv), 0, Total.indiv),
+         Total.indiv.water = ifelse(is.na(Total.indiv.water), 0, Total.indiv.water),
+         Total.days = ifelse(is.na(Total.days), 0, Total.days),
+         Total.days.water = ifelse(is.na(Total.days.water), 0, Total.days.water)) %>%
+  # filter only birds and mammals with detections from either method 
+  dplyr::filter(Class %in% c("Aves", "Mammalia") &
+                  (Mean_reads > 0 | Total.images > 0)) %>%
+  # remove non-native species detected from eDNA
+  dplyr::filter(Species %notin% c("Cairina moschata", "Aplonis panayensis", "Carpodacus erythrinus",
+                                  "Chloris sinica", "Cyanopica cyanus koreensis", "Turdus cardis")) %>%
+  # remove native species without reference sequences for eDNA
+  dplyr::filter(Species %notin% c("Astur cooperii", "Baeolophus bicolor", "Cyanocitta cristata",
+                                  "Empidonac traillii"))
+
+# create table of eDNA species detections by number of sites detected
+cameras.edna.site.tab <- cameras.edna.birds.mammals %>%
+  filter(Mean_reads > 0 & 
+           Species %notin% c("Cairina moschata", "Aplonis panayensis", "Carpodacus erythrinus",
+                             "Chloris sinica", "Cyanopica cyanus koreensis", "Turdus cardis",
+                             "Astur cooperii", "Baeolophus bicolor", "Cyanocitta cristata",
+                             "Empidonac traillii")) %>%
+  group_by(Class, Species) %>%
+  summarize(n.sites.eDNA = length(unique(Site)),
+            prop.sites.eDNA = n.sites.eDNA / 8) %>% ungroup()
+
+# create table of camera species detections by number of sites detected
+cameras.site.tab <- cameras.validation %>%
+  filter(Attention.Needed.Flag == "false" &
+           Class %in% c("Aves", "Mammalia")) %>%
+  group_by(Class, Species.binom) %>%
+  summarize(n.sites.cameras = length(unique(Site.Name)),
+            prop.sites.cam = n.sites.cameras / 8) %>% ungroup() %>%
+  dplyr::rename(Species = Species.binom) %>%
+  mutate(Species = ifelse(Species == "Leuconotopicus villosus", "Picoides villosus", Species))
+  
+# combine tables into one
+cameras.contr.tab <- cameras.site.tab %>%
+  full_join(cameras.edna.site.tab, by = c("Class", "Species")) %>%
+  replace(is.na(.), 0) %>%
+  arrange(Class, Species)
+
+# quick correlation of eDNA / camera species prevalence (total mess!)
+ggplot(cameras.contr.tab, aes(prop.sites.cam, prop.sites.eDNA, color = Class)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_abline(intercept = 0, slope = 1, lty = "dashed") +
+  theme_classic() + mythemes
+
+# looks like only waterfowl has any correspondence between methods!
+
+#### Cluster analysis comparing communities detected from either method ----
+#### NMDS and PERMANOVA to compare community data structure between methods ----
 
 
-# Cluster analysis to compare communities detected from either method
-# NMDS and PERMANOVA to compare community data structure
-# Mantel tests to compare monthly presence/absence data at the camera sites
-# Regression relating reads vs camera detections
-# Paired bar plots comparing species reads vs number of detections (something quantitative and z-scored)
+#### Mantel tests to compare presence/absence data at the camera sites ----
+
+# monthly composition comparison
+
+# overall (site-level) composition comparison
+
+#### Regression relating reads vs camera detections ----
+# simple correlation between reads and camera detection frequencies
+## by class
+ggplot(cameras.edna.combined, aes(scale(Total.images), scale(Mean_reads), color = Class)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_abline(intercept = 0, slope = 1, lty = "dashed") +
+  theme_classic() + mythemes +
+  labs(x = "images/day (z-score)", y = "eDNA reads (z-score)")
+
+## by order
+library(ggh4x)
+ggplot(cameras.edna.combined, aes(scale(Total.images), scale(Mean_reads))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_abline(intercept = 0, slope = 1, lty = "dashed", col = "grey") +
+  facet_wrap(~Class + Order) +
+  theme_bw() + mythemes +
+  theme(strip.text.x = element_text(size = 11)) +
+  labs(x = "images/day (z-score)", y = "eDNA reads (z-score)")
+
 # Compare simple summary of richness from either method
 
 
