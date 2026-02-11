@@ -54,11 +54,8 @@ ps.tax.samps <- subset_taxa(ps.dat.samps,
                             (Phylum == "Chordata" & 
                                ((Order != "Primates" | is.na(Order)) &
                                   (Family != "Bovidae" | is.na(Family)) &
-                                  (Species %notin% c("Felis catus",
-                                                     "Gallus gallus", 
-                                                     "Gallus gallus gallus",
-                                                     "Canis lupus familiaris") | is.na(Species)))))
-
+                                  (Species %notin% c("Gallus gallus", 
+                                                     "Gallus gallus gallus") | is.na(Species)))))
 # fix the reptile class
 tax.tab <- data.frame(tax_table(ps.tax.samps))
 tax.tab$Class[tax.tab$Class == "character(0)"] <- "Reptilia"
@@ -109,7 +106,9 @@ for(level in c("Phylum", "Class", "Order", "Family", "Genus", "Species")) {
 # print summary table
 tax.sum.tab
 #Samples   Reads ASVs Phylum Class Order Family Genus Species
-#140     3084553  228      1     5    22     49    74      84
+#1     140 3085888  232      1     5    22     49    75      86
+
+write.csv(tax.sum.tab, "data/assigned_taxa_sums.csv", row.names = FALSE)
 
 
 # 4. AGGLOMERATE TAXA BY GROUPS -------
@@ -230,7 +229,10 @@ ggplot(rar.melt, aes(Site, Reads, fill = !!sym(tax.level))) +
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
         legend.key.size = unit(0.4, "cm"),
         legend.position = "top") +
-  guides(fill=guide_legend(ncol=2))
+  guides(fill=guide_legend(nrow=1))
+
+ggsave("figures/community.composition.site.jpg", 
+       width = 8, height = 5, units = "in", dpi = 300)
 
 # community composition by site and wetland type
 ggplot(rar.melt, aes(factor(Wetland_type, levels = rev(c("Pool", "Semipermanent", "Permanent"))), 
@@ -264,11 +266,14 @@ ggplot(Diversity, aes(reorder(Site, Shannon), Shannon,
   theme_bw() + mythemes +
   guides(fill=guide_legend(title = "Wetland type"))
 
+ggsave("figures/ASV.diversity.shannons.site.jpg", 
+       width = 8, height = 6, units = "in", dpi = 300)
+
 # plot diversity by wetland type
-Diversity_melt_all <- melt(Diversity, 
-                           id.vars = c("ReadFile_Name", "Site", "Wetland_type"), 
-                           measure.vars = c("Observed", "Shannon", "Evenness"),
-                           variable.name = "Index")
+Diversity_melt_all <- reshape2::melt(Diversity, 
+                                     id.vars = c("ReadFile_Name", "Site", "Wetland_type"), 
+                                     measure.vars = c("Observed", "Shannon", "Evenness"),
+                                     variable.name = "Index")
 
 Diversity_melt_all$Wetland_type <- factor(Diversity_melt_all$Wetland_type,
                                           levels = c("Pool", "Semipermanent", "Permanent"))
@@ -290,10 +295,10 @@ Diversity$ReadFile_Name <- rownames(Diversity)
 Diversity <- left_join(Diversity, metadata.runs, by = "ReadFile_Name")
 
 # plot diversity by wetland type
-Diversity_melt_nofish <- melt(Diversity, 
-                              id.vars = c("ReadFile_Name", "Site", "Wetland_type"), 
-                              measure.vars = c("Observed", "Shannon", "Evenness"),
-                              variable.name = "Index")
+Diversity_melt_nofish <- reshape2::melt(Diversity, 
+                                        id.vars = c("ReadFile_Name", "Site", "Wetland_type"), 
+                                        measure.vars = c("Observed", "Shannon", "Evenness"),
+                                        variable.name = "Index")
 
 Diversity_melt_nofish$Wetland_type <- factor(Diversity_melt_nofish$Wetland_type,
                                           levels = c("Pool", "Semipermanent", "Permanent"))
@@ -333,11 +338,10 @@ amma_data <-
   left_join(raw.read.counts, by = "ReadFile_Name") %>%
   mutate(eDNA_day = paste(month(Date, label = T, abbr = T), day(Date)),
          DOY = yday(Date),
-         Hatch = ifelse(Date < "2023-06-01", "No", "Yes"),
-         Wetland_vol = 0.5*Area_sq_m*Spring_depth_cm) %>%
+         Hatch = ifelse(Date < "2023-06-01", "No", "Yes")) %>%
   filter(Species == "Ambystoma maculatum" & !is.na(AMMA_eggs)) %>%
   group_by(Site, DOY, eDNA_day, Hatch) %>% 
-  summarize(Reads = mean(Abundance),
+  dplyr::summarize(Reads = mean(Abundance),
             Reads_norm = mean(Abundance/Raw_reads),
             Reads_per_ml = mean(Abundance/Sample_Volume_ml),
             Reads_per_ml_norm = mean((Abundance/Raw_reads)/Sample_Volume_ml),
@@ -359,7 +363,7 @@ amma_data$Reads_per_ml_m3_norm <- amma_data$Reads_per_ml_norm / amma_data$Wetlan
   geom_point() +
   geom_smooth(method = "lm", se = FALSE) +
   theme_classic() + mythemes +
-  labs(x = "Salamander egg masses", y = "Salamander eDNA read count"))
+  labs(x = "Egg masses", y = "eDNA read count"))
 
 # relationship, corrected for vol
 ggplot(amma_data, aes(AMMA_eggs_per_m2, Reads_per_ml_m3)) +
@@ -392,7 +396,7 @@ ggplot(amma_data, aes(log(AMMA_eggs_per_m2), log(Reads_per_ml_m3+1), color = Hat
   geom_point() +
   geom_smooth(method = "lm", se = FALSE) +
   theme_classic() + mythemes +
-  labs(x = "DOY", y = "Salamander eDNA read count"))
+  labs(x = "DOY", y = "eDNA read count"))
 
 # gamm to account for nonlinear effects of time of eDNA sample
 library(mgcv)
@@ -438,7 +442,7 @@ qplot(amma_data$Reads_per_ml_m3, predict(eggXdate_eDNA_gamm)) +
 ## let's create prediction surfaces 
 pred.grads <- expand.grid(AMMA_eggs_per_m2 = seq(min(amma_data$AMMA_eggs_per_m2, na.rm = T),
                                                  max(amma_data$AMMA_eggs_per_m2, na.rm = T)*1.01, 
-                                                 length.out = 100),
+                                                 length.out = 30),
                           DOY = seq(min(amma_data$DOY), 
                                     max(amma_data$DOY)*1.01, 
                                     1),
@@ -462,6 +466,8 @@ ggplot(egg.date.pred, aes(x = AMMA_eggs_per_m2, y = DOY, z = fit)) +
   guides(fill = guide_colorbar(title = "Reads/ml/m3"))
 
 # the gam seems to be overfitting
+
+# use linear model 
 
 # parametric model to assess significance with lmer
 library(lme4)
@@ -495,11 +501,13 @@ lmer.null <- lmer(sqrt(Reads_per_ml_m3) ~ 1 + (1|Site),
                   data = amma_data)
 
 library(performance)
+library(MuMIn)
 check_normality(lmer.full) # no good!
 check_heteroscedasticity(lmer.full) # good!
 AICtab(lmer.full, lmer.add, lmer.eggs, lmer.DOY, lmer.null) 
 anova(lmer.add, lmer.full) # additive model is better
 summary(lmer.add)
+performance::r2(lmer.add)
 
 ## let's create prediction surfaces 
 egg.date.pred <- as.data.frame(predict(lmer.add, re.form= NA,
@@ -524,39 +532,68 @@ lmer.pred.eggs.eDNA <- ggplot(egg.date.pred, aes(x = AMMA_eggs_per_m2, y = DOY, 
 lmer.pred.eggs.eDNA
 
 # glmer with lognormal distribution
-glmer.full <- glmer(Reads_per_ml_m3+1 ~ 
+glmer.full <- glmer(Reads_per_ml_m3 ~ 
                      scale(AMMA_eggs_per_m2) * scale(DOY) + (1|Site), 
                    family = gaussian(link = "log"),
-                   data = amma_data)
-glmer.add <- glmer(Reads_per_ml_m3+1 ~ 
+                   data = amma_data,
+                   mustart=pmax(amma_data$AMMA_eggs,1e-3))
+glmer.add <- glmer(Reads_per_ml_m3 ~ 
                       scale(AMMA_eggs_per_m2) + scale(DOY) + (1|Site), 
                     family = gaussian(link = "log"),
-                    data = amma_data)
-glmer.eggs <- glmer(Reads_per_ml_m3+1 ~ 
+                    data = amma_data,
+                   mustart=pmax(amma_data$AMMA_eggs,1e-3))
+glmer.eggs <- glmer(Reads_per_ml_m3 ~ 
                      scale(AMMA_eggs_per_m2) + (1|Site), 
                    family = gaussian(link = "log"),
-                   data = amma_data)
-glmer.DOY <- glmer(Reads_per_ml_m3+1 ~ 
+                   data = amma_data,
+                   mustart=pmax(amma_data$AMMA_eggs,1e-3))
+glmer.DOY <- glmer(Reads_per_ml_m3 ~ 
                     scale(DOY) + (1|Site), 
                   family = gaussian(link = "log"),
-                  data = amma_data)
-glmer.null <- glmer(Reads_per_ml_m3+1 ~ 1 + (1|Site), 
+                  data = amma_data,
+                  mustart=pmax(amma_data$AMMA_eggs,1e-3))
+glmer.null <- glmer(Reads_per_ml_m3 ~ 1 + (1|Site), 
                    family = gaussian(link = "log"),
-                   data = amma_data)
+                   data = amma_data,
+                   mustart=pmax(amma_data$AMMA_eggs,1e-3))
 
-AICtab(glmer.full, glmer.add, glmer.eggs, glmer.DOY, glmer.null)
+bbmle::AICctab(glmer.full, glmer.add, glmer.eggs, glmer.DOY, glmer.null, weights = TRUE)
 anova(glmer.full, glmer.add)
-summary(glmer.full)
 summary(glmer.add)
+performance::r2(glmer.add)
 
 ## let's create prediction surfaces 
-egg.date.pred <- as.data.frame(predict(glmer.full, re.form= NA,
+egg.date.pred <- as.data.frame(predict(glmer.add, re.form = NA, type = "response",
                                        newdata = pred.grads, se.fit = TRUE))
 
 egg.date.pred <- cbind(pred.grads, egg.date.pred)
 
-ggplot(egg.date.pred, aes(x = AMMA_eggs_per_m2, y = DOY, z = fit)) +
+egg.date.pred.avg <- as.data.frame(modavgPred(list(glmer.full, glmer.add, glmer.eggs, glmer.DOY, glmer.null), 
+                                          modnames = c("Full", "Additive", "Eggs", "DOY", "Null"),
+                                          re.form = NA, type = "response", 
+                                          newdata = pred.grads, se.fit = TRUE))
+
+egg.date.pred.avg <- cbind(pred.grads, egg.date.pred.avg)
+
+# for one model
+glmer.pred <- ggplot(egg.date.pred, aes(x = AMMA_eggs_per_m2, y = DOY, z = fit)) +
   geom_raster(aes(fill = fit), interpolate = TRUE) +
+  geom_contour(colour = "white") + 
+  geom_point(data = amma_data, inherit.aes = FALSE, 
+             aes(x = AMMA_eggs_per_m2, y = DOY), shape = "+", 
+             color = "grey", size = 4) +
+  scale_fill_scico(palette = 'davos') +
+  theme_bw() + mythemes +
+  labs(x = expression(paste("Egg masses / ", m^{2}))) +
+  scale_x_continuous(expand = c(0,0)) + 
+  scale_y_continuous(expand = c(0,0)) +
+  guides(fill = guide_colorbar(title = expression(paste("Reads / ml / ", m^{3}))))
+
+glmer.pred
+
+# model averaged estimates
+glmer.avg.pred <- ggplot(egg.date.pred.avg, aes(x = AMMA_eggs_per_m2, y = DOY, z = mod.avg.pred)) +
+  geom_raster(aes(fill = mod.avg.pred), interpolate = TRUE) +
   geom_contour(colour = "white") + 
   geom_point(data = amma_data, inherit.aes = FALSE, 
              aes(x = AMMA_eggs_per_m2, y = DOY), shape = "+", 
@@ -566,20 +603,22 @@ ggplot(egg.date.pred, aes(x = AMMA_eggs_per_m2, y = DOY, z = fit)) +
   labs(x = "Salamander egg masses / m2") +
   scale_x_continuous(expand = c(0,0)) + 
   scale_y_continuous(expand = c(0,0)) +
-  guides(fill = guide_colorbar(title = "log(Reads/ml/m3)"))
+  guides(fill = guide_colorbar(title = "Reads/ml/m3"))
+
+glmer.avg.pred
 
 # combine some plots for sharing
 ggarrange(ggarrange(raw.amma.egg.cor + ylab("eDNA abundance") + xlab("Egg masses") +
                       theme(plot.margin=unit(c(0,1,0,1), 'cm')), 
                     raw.amma.date.cor + ylab("eDNA abundance") +
                       theme(plot.margin=unit(c(0,1,0,1), 'cm')), labels = c("A", "B")),
-          lmer.pred.eggs.eDNA, nrow = 2, labels = c("", "C"))
+          glmer.pred, nrow = 2, labels = c("", "C"))
 
 ggsave("figures/egg.mass.validation.jpg", 
        width = 9, height = 7, units = "in", dpi = 300)
 
 ### 7a-2. eDNA vs trapping ----
-#### load trapping data ----
+#### load trapping data
 traps <- read.csv("data/trapping_data.csv")
 traps$Date <- as.Date(traps$Date, format = "%m/%d/%Y")
 
@@ -671,7 +710,7 @@ for(species in c("AMBY", "AMLA", "AMMA", "LISY")) {
     mutate(across(c(y.1, y.2, y.3), makebinary))
 }
 
-#### format eDNA data in same way for occupancy analysis ----
+#### format eDNA data in same way for occupancy analysis
 eDNA_occu_data <- list()
 for(species in c("Ambystoma barbouri", "Ambystoma laterale", 
                  "Ambystoma maculatum", "Lithobates sylvaticus")) {
@@ -693,7 +732,7 @@ for(species in c("Ambystoma barbouri", "Ambystoma laterale",
     mutate(across(c(y.1, y.2, y.3, y.4), makebinary))
 }
 
-# combine trapping and eDNA data for analysis----
+# combine trapping and eDNA data for analysis
 combined_occu_data <- list() 
 for(spp in 1:length(trap_occu_data)) {
   combined_occu_data[[names(trap_occu_data[spp])]] <-
@@ -807,6 +846,13 @@ ggplot(modavgdat.spp, aes(Date.mdy, mod.avg.pred, color = Method, fill = Method,
   theme_bw() + mythemes
 
 # top model effects, bivariate predictions
+fig.labs <- c("Wood Frog", "Spotted Salamander", 
+              "Unisexual Salamander", "Blue-spotted Salamander")
+fig.lets <- LETTERS[1:4]
+names(fig.lets) <- c("LISY", "AMMA", "AMBY", "AMLA")
+fig.lets.labs <- paste(fig.lets, "  ", fig.labs)
+names(fig.lets.labs) <- c("LISY", "AMMA", "AMBY", "AMLA")
+
 pred.spp <- NULL
 for(spp in names(occu_mod_outputs)) {
   newdat <- data.frame(expand.grid(c("eDNA", "Trapping"), 
@@ -821,10 +867,12 @@ for(spp in names(occu_mod_outputs)) {
 }
 
 pred.spp$Date.mdy <- as.Date("2023-01-01") + (pred.spp$Date - 1)
+pred.spp$Species <- factor(pred.spp$Species, levels = c("LISY", "AMMA", "AMBY", "AMLA"))
+
 ggplot(pred.spp, aes(Date.mdy, Predicted, color = Method, fill = Method, lty = Method)) +
   geom_line(lwd = 1.1) +
   geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.3) +
-  facet_wrap(~Species) +
+  facet_wrap(~Species, labeller = as_labeller(fig.lets.labs)) +
   scale_x_date(limits = c(as.Date("2023-04-18"), as.Date("2023-05-03")),
                breaks = c(as.Date("2023-04-18"), as.Date("2023-04-25"), as.Date("2023-05-02")),
                date_labels = "%b %d") +
@@ -845,6 +893,9 @@ for(variable in c("Method", "Date")) {
   }
   # combine
   occu.plots.univar[[variable]][["Data"]] <- bind_rows(occu.plots.univar[[variable]])
+  occu.plots.univar[[variable]][["Data"]]$Species <- 
+    factor(occu.plots.univar[[variable]][["Data"]]$Species, 
+           levels = c("LISY", "AMMA", "AMBY", "AMLA"))
   # make plots
   if(variable == "Method") {
     occu.plots.univar[[variable]][["Data"]]$Method <- 
@@ -852,11 +903,12 @@ for(variable in c("Method", "Date")) {
              levels = c("Trapping", "eDNA"))
     occu.plots.univar[[variable]][["Plot"]] <-
       ggplot(occu.plots.univar[[variable]][["Data"]], 
-             aes(x = Method, y = Predicted, shape = Method, color = Method)) +
+             aes(x = Method, y = Predicted, shape = Method, fill = Method)) +
+      geom_errorbar(aes(ymin = lower, ymax = upper), width = 0) +
       geom_point(size = 3) +
-      geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
-      scale_color_manual(values = col2[1:2]) +
-      facet_wrap(~Species) +
+      scale_fill_manual(values = col2[1:2]) +
+      scale_shape_manual(values = c(21,24)) +
+      facet_wrap(~Species, labeller = as_labeller(fig.lets.labs)) +
       labs(x = variable, y = "Probability of detection") +
       theme_bw() + mythemes
   } else {
@@ -864,7 +916,7 @@ for(variable in c("Method", "Date")) {
       ggplot(occu.plots.univar[[variable]][["Data"]], aes(x = covariateValue, y = Predicted)) +
       geom_line() +
       geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
-      facet_wrap(~Species) +
+      facet_wrap(~Species, labeller = as_labeller(fig.lets.labs)) +
       labs(x = variable, y = "Probability of detection") +
       theme_bw() + mythemes
   }
@@ -889,6 +941,7 @@ spp_labeller <- function(variable,value){
 
 # update figure without editing data
 amph.method.det <- occu.plots.univar$Method$Plot + facet_wrap(~Species, labeller=spp_labeller)
+amph.method.det <- occu.plots.univar$Method$Plot
 amph.method.det
 ggsave("figures/trapping.validation.jpg", 
        width = 9, height = 7, units = "in", dpi = 300)
@@ -931,20 +984,43 @@ for(spp in names(occu_mod_outputs)) {
 }
 
 curve_data$Method <- factor(curve_data$Method, levels = c("Trapping", "eDNA"))
+curve_data$Species <- factor(curve_data$Species, levels = c("LISY", "AMMA", "AMBY", "AMLA"))
 
-(amph.method.det.curve <- ggplot(curve_data, aes(x = x, y = y, color = Method)) +
-  geom_errorbar(aes(ymin = ymin, ymax = ymax), width = 0.3) +
-  geom_point(size = 2) +
-  geom_line() +
+(amph.method.det.curve <- ggplot(curve_data, aes(x = x, y = y, shape = Method)) +
+  geom_line(aes(color = Method)) +
+  geom_errorbar(aes(ymin = ymin, ymax = ymax, color = Method), width = 0, position = position_dodge(0.4)) +
+  geom_point(aes(color = Method, fill = Method), size = 2, position = position_dodge(0.4)) +
+  geom_hline(aes(yintercept = 0.95), linetype = "dashed", color = "grey") +
   scale_color_manual(values = col2[1:2]) +
+  scale_fill_manual(values = col2[1:2]) +
+  scale_shape_manual(values = c(21,24)) +
   scale_x_continuous(breaks = c(1:10)) +
-  facet_wrap(~Species) +
-  labs(x = "Sampling units (eDNA samples, trapping nights)", y = "Cumulative detection prob.") +
-  theme_bw() + mythemes)
+  facet_wrap(~Species, nrow = 4) +
+  labs(x = "Sampling units", y = "Cumulative detection prob.") +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), # Remove major grid lines
+        panel.grid.minor = element_blank(), # Remove minor grid lines
+        panel.background = element_blank(),
+        strip.background = element_blank()) + mythemes)
 
-amph.method.det.curve + facet_wrap(~Species, labeller=spp_labeller)
+amph.method.det.curve + facet_wrap(~Species, labeller = as_labeller(fig.lets.labs))
 ggsave("figures/trapping.validation.curve.jpg", 
        width = 9, height = 7, units = "in", dpi = 300)
+
+fig.lets.labs.2col <- c("E    Wood frog", "F    Spotted Salamander", 
+                        "G    Unisexual Salamander", "H    Blue-spotted Salamander")
+names(fig.lets.labs.2col) <- names(fig.lets)
+ggarrange(amph.method.det + 
+            facet_wrap(~Species, labeller = as_labeller(fig.lets.labs), nrow = 4) +
+            theme(panel.grid.major = element_blank(),
+                  panel.grid.minor = element_blank(), 
+                  panel.background = element_blank(),
+                  strip.background = element_blank()),
+          amph.method.det.curve + facet_wrap(~Species, labeller = as_labeller(fig.lets.labs.2col), nrow = 4),
+          common.legend = T, legend = "right")
+ggsave("figures/trapping.validation.curve.composite.jpg", 
+       width = 9, height = 7, units = "in", dpi = 300)
+
 
 ### 7a-3. eDNA vs cameras ----
 #### load and combine eDNA and camera datasets ----
@@ -965,9 +1041,9 @@ cameras.edna.agg <- cameras.edna %>%
   mutate(Site = ifelse(Site == "RW-Stream", "RW-S", Site),
          Date_simple = format(Date, "%Y-%m-%d")) %>%
   group_by(Site, Date_simple, OTU) %>%
-  summarize(Mean_reads = mean(Abundance),
+  dplyr::summarize(Mean_reads = mean(Abundance),
             DateTimeSurvey = max(Date)) %>% ungroup() %>%
-  group_by(Site) %>%
+  dplyr::group_by(Site) %>%
   mutate(Occasion = frank(Date_simple, ties.method = "dense")) %>% ungroup() %>%
   left_join(dplyr::select(cameras.edna, OTU, Class, Order, Family, Genus, Species),
             by = "OTU", multiple = "first")
@@ -983,6 +1059,7 @@ cameras.edna.birds.mammals <-
 # make some post-hoc species assignments to both datasets
 cameras.validation <- cameras.validation %>%
   mutate(Species.binom = case_when(Species.binom == "Canis familiaris" ~ "Canis lupus familiaris",
+                                   Species.binom == "Felix catus" ~ "Felis catus",
                                    TRUE ~ Species.binom))
 
 cameras.edna.birds.mammals <- cameras.edna.birds.mammals %>%
@@ -1028,7 +1105,7 @@ cameras.validation.agg <- cameras.validation %>%
   filter(Family != "" & Attention.Needed.Flag == "false") %>% # omit empty or ambiguous images
   mutate(Date = date(ymd_hms(Date.Time))) %>% # create day variable for daily counts
   group_by(Site.Name, Occasion, Class, Order, Family, Genus, Species.binom) %>%
-  summarize(Total.images = n()/unique(Occasion.dur),
+  dplyr::summarize(Total.images = n()/unique(Occasion.dur),
             Total.images.water = sum(Contacting.water == "Yes")/unique(Occasion.dur),
             Total.indiv = sum(Sighting.Quantity)/unique(Occasion.dur),
             Total.indiv.water = sum(Sighting.Quantity[Contacting.water == "Yes"])/unique(Occasion.dur),
@@ -1056,20 +1133,25 @@ cameras.edna.combined <- full_join(cameras.edna.agg, cameras.validation.agg,
                   (Mean_reads > 0 | Total.images > 0)) %>%
   # remove non-native species detected from eDNA
   dplyr::filter(Species %notin% c("Cairina moschata", "Aplonis panayensis", "Carpodacus erythrinus",
-                                  "Chloris sinica", "Cyanopica cyanus koreensis", "Turdus cardis")) %>%
+                                  "Chloris sinica", "Mus spretus", "Rattus norvegicus")) %>%
   # remove native species without reference sequences for eDNA
-  dplyr::filter(Species %notin% c("Astur cooperii", "Baeolophus bicolor", "Cyanocitta cristata",
-                                  "Empidonac traillii"))
+  dplyr::filter(Species %notin% c("Astur cooperii", "Baeolophus bicolor","Empidonac traillii")) %>%
+  # rename / group species to be shared across methods
+  mutate(Species = ifelse(Species == "Leuconotopicus villosus", "Picoides villosus", Species),
+         Species = ifelse(Species == "Canis lupus", "Canis lupus familiaris", Species),
+         Species = ifelse(Species %in% c("Peromyscus maniculatus", 
+                                         "Peromyscus  maniculatus", 
+                                         "Peromyscus leucopus"), 
+                          "Peromyscus sp.", Species))
 
 # create table of eDNA species detections by number of sites detected
 cameras.edna.site.tab <- cameras.edna.birds.mammals %>%
   filter(Mean_reads > 0 & 
            Species %notin% c("Cairina moschata", "Aplonis panayensis", "Carpodacus erythrinus",
-                             "Chloris sinica", "Cyanopica cyanus koreensis", "Turdus cardis",
-                             "Astur cooperii", "Baeolophus bicolor", "Cyanocitta cristata",
-                             "Empidonac traillii")) %>%
+                             "Chloris sinica", "Mus spretus", "Rattus norvegicus",
+                             "Astur cooperii", "Baeolophus bicolor","Empidonac traillii")) %>%
   group_by(Class, Species) %>%
-  summarize(n.sites.eDNA = length(unique(Site)),
+  dplyr::summarize(n.sites.eDNA = length(unique(Site)),
             prop.sites.eDNA = n.sites.eDNA / 8) %>% ungroup()
 
 # create table of camera species detections by number of sites detected
@@ -1077,7 +1159,7 @@ cameras.site.tab <- cameras.validation %>%
   filter(Attention.Needed.Flag == "false" &
            Class %in% c("Aves", "Mammalia")) %>%
   group_by(Class, Species.binom) %>%
-  summarize(n.sites.cameras = length(unique(Site.Name)),
+  dplyr::summarize(n.sites.cameras = length(unique(Site.Name)),
             prop.sites.cam = n.sites.cameras / 8) %>% ungroup() %>%
   dplyr::rename(Species = Species.binom) %>%
   mutate(Species = ifelse(Species == "Leuconotopicus villosus", "Picoides villosus", Species))
@@ -1093,14 +1175,10 @@ ggplot(cameras.contr.tab, aes(prop.sites.cam, prop.sites.eDNA, color = Class)) +
   geom_point() +
   geom_smooth(method = "lm", se = FALSE) +
   geom_abline(intercept = 0, slope = 1, lty = "dashed") +
+  ylim(c(0,1)) +
   theme_classic() + mythemes
 
-# looks like only waterfowl has any correspondence between methods!
-
-#### Cluster analysis comparing communities detected from either method ----
 #### NMDS and PERMANOVA to compare community data structure between methods ----
-
-
 #### Mantel tests to compare presence/absence data at the camera sites ----
 
 # monthly composition comparison
@@ -1109,6 +1187,8 @@ ggplot(cameras.contr.tab, aes(prop.sites.cam, prop.sites.eDNA, color = Class)) +
 
 #### Regression relating reads vs camera detections ----
 # simple correlation between reads and camera detection frequencies
+## standardize eDNA reads and images for each species
+
 ## by class
 ggplot(cameras.edna.combined, aes(scale(Total.images), scale(Mean_reads), color = Class)) +
   geom_point() +
@@ -1119,7 +1199,7 @@ ggplot(cameras.edna.combined, aes(scale(Total.images), scale(Mean_reads), color 
 
 ## by order
 library(ggh4x)
-ggplot(cameras.edna.combined, aes(scale(Total.images), scale(Mean_reads))) +
+ggplot(cameras.edna.combined, aes(scale(Total.images),  scale(Mean_reads))) +
   geom_point() +
   geom_smooth(method = "lm", se = FALSE) +
   geom_abline(intercept = 0, slope = 1, lty = "dashed", col = "grey") +
@@ -1128,7 +1208,46 @@ ggplot(cameras.edna.combined, aes(scale(Total.images), scale(Mean_reads))) +
   theme(strip.text.x = element_text(size = 11)) +
   labs(x = "images/day (z-score)", y = "eDNA reads (z-score)")
 
-# Compare simple summary of richness from either method
+# remove species with <3 records
+library(scales)
+cameras.edna.combined %>%
+  group_by(Species) %>%
+  filter(n() > 3) %>%
+  ggplot(aes(Total.images,  scale(Mean_reads))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_abline(intercept = 0, slope = 1, lty = "dashed", col = "grey") +
+  scale_x_continuous(breaks = function(x) unique(floor(pretty(seq(min(x), (max(x) + 1) * 1.1))))) +
+  facet_wrap(~Class + Order, scales = "free_x") +
+  theme_bw() + mythemes +
+  theme(strip.text.x = element_text(size = 11)) +
+  labs(x = "images/day", y = "eDNA reads (z-score)")
+
+## with logistic curves (probability of detecting species with eDNA)
+cameras.edna.combined %>%
+  group_by(Species) %>%
+  filter(n() > 3) %>%
+  ggplot(aes(Total.images,  makebinary(Mean_reads))) +
+  geom_point() +
+  geom_smooth(method = "glm", 
+              method.args = list(family = "binomial"), 
+              se = FALSE) +
+  facet_wrap(~Class + Order, scales = "free_x") +
+  theme_bw() + mythemes +
+  theme(strip.text.x = element_text(size = 11)) +
+  labs(x = "images/day", y = "eDNA detection")
+
+## only including observations with image data
+cameras.edna.combined %>%
+  filter(Total.images > 0) %>%
+  ggplot(aes(scale(Total.images),  scale(Mean_reads))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_abline(intercept = 0, slope = 1, lty = "dashed", col = "grey") +
+  facet_wrap(~Class + Order, scales = "free") +
+  theme_bw() + mythemes +
+  theme(strip.text.x = element_text(size = 11)) +
+  labs(x = "images/day (z-score)", y = "eDNA reads (z-score)")
 
 
 ### 7b. Landscape eDNA analysis
@@ -1157,3 +1276,526 @@ jamison_tax_summary <- jamison_sites_melt %>% group_by(Site, Class) %>% filter(A
 larson_sites_melt <- subset_samples(ps.tax.samps.cust, Site %in% c("Larson")) %>% psmelt()
 larson_tax_summary <- larson_sites_melt %>% group_by(Site, Class) %>% filter(Abundance > 0) %>% summarize(taxa = unique(Taxonomy))
 
+#### 7b. Overall diversity comparison ----
+# 7b-1. Venn diagrams and community composition ----
+# create empty data frame to populate
+## get total number of amphibian species detected with either method
+methods.venn <- data.frame(Class = c("Amphibian", "Mammal", "Bird"),
+                           Trad = NA,
+                           eDNA = NA,
+                           Both = NA)
+amphibian.trad <- c("Lithobates sylvaticus", "Ambystoma barbouri", "Ambystoma maculatum", 
+                        "Ambystoma laterale", "Pseudacris crucifer", "Lithobates septentrionalis",
+                        "Lithobates clamitans", "Notophthalmus viridescens")
+amphibian.eDNA.melt <- ps.tax.samps.spp %>%
+  psmelt() %>%
+  mutate(Date = as.Date(Date, format = "%m/%d/%Y")) %>%
+  filter(Class == "Amphibia" &
+           # remove non-native species
+           Species %notin% c("Ambystoma opacum", "Ambystoma jeffersonianum") &
+           Date < "2023-05-05" &
+           Trapping == "Yes") %>%
+  mutate(Species = ifelse(Species == "Lithobates catesbeianus", "Lithobates clamitans", Species))
+amphibian.eDNA <- unique(amphibian.eDNA.melt$Species)
+
+## populate in empty summary data frame for amphibians
+methods.venn[methods.venn$Class == "Amphibian", "Trad"] <- 
+  sum(amphibian.trad %notin% amphibian.eDNA)
+methods.venn[methods.venn$Class == "Amphibian", "eDNA"] <- 
+  sum(amphibian.eDNA %notin% amphibian.trad)
+methods.venn[methods.venn$Class == "Amphibian", "Both"] <- 
+  sum(amphibian.trad %in% amphibian.eDNA)
+
+## populate in empty summary data frame for mammal
+cameras.edna.combined.venn <- full_join(cameras.edna.agg, cameras.validation.agg,
+                                        by = c("Site", "Occasion", "Class",
+                                               "Order", "Family", "Genus", "Species")) %>%
+  # fill in zeroes for either method missing data
+  mutate(Mean_reads = ifelse(is.na(Mean_reads), 0, Mean_reads),
+         Total.images = ifelse(is.na(Total.images), 0, Total.images),
+         Total.images.water = ifelse(is.na(Total.images.water), 0, Total.images.water),
+         Total.indiv = ifelse(is.na(Total.indiv), 0, Total.indiv),
+         Total.indiv.water = ifelse(is.na(Total.indiv.water), 0, Total.indiv.water),
+         Total.days = ifelse(is.na(Total.days), 0, Total.days),
+         Total.days.water = ifelse(is.na(Total.days.water), 0, Total.days.water)) %>%
+  # filter only birds and mammals with detections from either method 
+  dplyr::filter(Class %in% c("Aves", "Mammalia") &
+                  (Mean_reads > 0 | Total.images > 0)) %>%
+  # remove non-native species detected from eDNA
+  dplyr::filter(Species %notin% c("Cairina moschata", "Aplonis panayensis", "Carpodacus erythrinus",
+                                  "Chloris sinica", "Mus spretus", "Rattus norvegicus")) %>%
+  mutate(Species = ifelse(Species == "Leuconotopicus villosus", "Picoides villosus", Species),
+         Species = ifelse(Species == "Canis lupus", "Canis lupus familiaris", Species),
+         Species = ifelse(Species %in% c("Peromyscus maniculatus", "Peromyscus  maniculatus", "Peromyscus leucopus"), "Peromyscus sp.", Species))
+
+mammal.trad <- unique(cameras.edna.combined.venn[cameras.edna.combined.venn$Class == "Mammalia" & 
+                                              cameras.edna.combined.venn$Total.images > 0,]$Species)
+mammal.eDNA <- unique(cameras.edna.combined.venn[cameras.edna.combined.venn$Class == "Mammalia" & 
+                                              cameras.edna.combined.venn$Mean_reads > 0,]$Species)
+methods.venn[methods.venn$Class == "Mammal", "Trad"] <- 
+  sum(mammal.trad %notin% mammal.eDNA)
+methods.venn[methods.venn$Class == "Mammal", "eDNA"] <- 
+  sum(mammal.eDNA %notin% mammal.trad)
+methods.venn[methods.venn$Class == "Mammal", "Both"] <- 
+  sum(mammal.trad %in% mammal.eDNA)
+
+## populate in empty summary data frame for bird
+bird.trad <- unique(cameras.edna.combined.venn[cameras.edna.combined.venn$Class == "Aves" & 
+                                              cameras.edna.combined.venn$Total.images > 0,]$Species)
+bird.eDNA <- unique(cameras.edna.combined.venn[cameras.edna.combined.venn$Class == "Aves" & 
+                                              cameras.edna.combined.venn$Mean_reads > 0,]$Species)
+methods.venn[methods.venn$Class == "Bird", "Trad"] <- 
+  sum(bird.trad %notin% bird.eDNA)
+methods.venn[methods.venn$Class == "Bird", "eDNA"] <- 
+  sum(bird.eDNA %notin% bird.trad)
+methods.venn[methods.venn$Class == "Bird", "Both"] <- 
+  sum(bird.trad %in% bird.eDNA)
+
+## add a total column
+methods.venn$Total <- methods.venn$Trad + methods.venn$eDNA + methods.venn$Both
+
+## venn diagrams
+library(ggvenn)
+amph <- list(Traditional = amphibian.trad, eDNA = amphibian.eDNA)
+bird <- list(Traditional = bird.trad, eDNA = bird.eDNA)
+mammal <- list(Traditional = mammal.trad, eDNA = mammal.eDNA)
+
+# crete separate legend to attach to composite fig
+dummy_legend <- 
+  ggplot(data.frame(Method = factor(c("Traditional", "eDNA"),
+                                    levels = c("Traditional", "eDNA")),
+                    y = c(1, 1)),
+         aes(x = Method, y = y, fill = Method)) +
+  geom_col() +
+  scale_fill_manual(
+    values = c("dodgerblue", "purple"),
+    name = "Method") +
+  theme_void() +
+  theme(legend.position = "right",
+        legend.key.size = unit(0.5, "cm"),
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 15),
+        legend.box.spacing = unit(0, "pt"))+
+  guides(fill=guide_legend(ncol= 1))
+
+legend.grob <- cowplot::get_legend(dummy_legend)
+
+amph.venn <- ggvenn(amph, auto_scale = TRUE, fill_color = c("dodgerblue", "purple"), 
+                    fill_alpha = 0.4, show_percentage = FALSE, set_name_color = "transparent") +
+  ggtitle("Amphibians \n (S = 12)") +
+  theme(plot.title.position = 'panel', 
+        plot.title = element_text(hjust = 0.5, vjust = -0.4, size = 16),
+        plot.margin=unit(c(0,0,0,0), "pt"))+
+  coord_fixed(expand = FALSE)
+
+bird.venn <- ggvenn(bird, auto_scale = TRUE, fill_color = c("dodgerblue", "purple"), 
+                    fill_alpha = 0.4, show_percentage = FALSE, set_name_color = "transparent") +
+  ggtitle("Birds \n (S = 31)") +
+  theme(plot.title.position = 'panel', 
+        plot.title = element_text(hjust = 0.5, size = 16),
+        plot.margin=unit(c(0,0,0,0), "pt"))+
+  coord_fixed(expand = FALSE)
+
+mammal.venn <- ggvenn(mammal, auto_scale = TRUE, fill_color = c("dodgerblue", "purple"), 
+                      fill_alpha = 0.4, show_percentage = FALSE, set_name_color = "transparent") +
+  ggtitle("Mammals \n (S = 25)") +
+  theme(plot.title.position = 'panel', 
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 16),
+        plot.margin=unit(c(0,0,0,0), "pt"))+
+  coord_fixed(expand = FALSE)
+
+venn.comp.1r <- ggarrange(amph.venn, bird.venn, mammal.venn, legend.grob,
+                       ncol = 4, labels = c("A", "B", "C", ""),
+                       label.y = 0.88)
+venn.comp.1r
+
+venn.comp <- ggarrange(amph.venn, bird.venn, NULL, mammal.venn, legend.grob,
+                       nrow = 2, ncol = 2, labels = c("A", "B", "C", ""))
+venn.comp
+
+ggsave("figures/trapping.validation.venn.jpg", 
+       width = 6, height = 6, units = "in", dpi = 300)
+
+# combine venn diagrams with 12S composition in seasonal versus semi/permanent wetlands
+rar.melt$Wetland_type2 <- rar.melt$Wetland_type
+rar.melt$Wetland_type2[rar.melt$Wetland_type2 == "Pool"] <- "Seasonal"
+rar.melt$Wetland_type2 <- factor(rar.melt$Wetland_type2, 
+                                 levels = c("Seasonal", "Semipermanent", "Permanent"))
+rar.melt <- rar.melt[!is.na(rar.melt$Class),]
+
+class.comp.type <- rar.melt %>% group_by(Wetland_type2, Class) %>%
+  dplyr::summarize(Reads = sum(Reads)) %>%
+  ggplot(aes(factor(Wetland_type2, levels = rev(c("Seasonal", "Semipermanent", "Permanent"))), 
+             Reads, fill = Class)) +
+  geom_bar(stat = "identity", position = "fill", color = "black", width = 0.75) +
+  labs(x = NULL, y = "Prop. reads") +
+  scale_x_discrete(drop=FALSE) +
+  coord_flip() +
+  scale_fill_manual(values = brewer.pal(n = 6, name = "Accent")) +
+  theme_void() + mythemes +
+  theme(plot.title = element_text(size = 18),
+        legend.title = element_text(size = 16), 
+        legend.text = element_text(size = 12),
+        axis.text.y = element_text(hjust = 1),
+        legend.key.size = unit(0.4, "cm"),
+        legend.position = "top") +
+  guides(fill=guide_legend(nrow = 1, reverse = TRUE))
+
+class.comp.type
+
+ggarrange(venn.comp.1r,
+          class.comp.type, 
+          nrow = 2, heights = c(0.75,0.5),
+          labels = c("", "D"))
+
+ggsave("figures/trapping.validation.eDNA_composition.1row.jpg", 
+       width = 8, height = 6, units = "in", dpi = 300)
+
+# 7b-2. Relating naive occupancy between methods ----
+
+# amphibian data
+## create validation dataset
+amphibian.eDNA.val <- 
+  ps.tax.samps.spp %>%
+  psmelt() %>%
+  filter(Class == "Amphibia" &
+           # remove non-native species
+           Species %notin% c("Ambystoma opacum", "Ambystoma jeffersonianum") &
+           Trapping == "Yes" | Egg_mass_survey == "Yes") %>%
+  mutate(Species = ifelse(Species == "Lithobates catesbeianus", "Lithobates clamitans", Species),
+         Site = ifelse(Site == "RW-Stream", "RW-S", Site))
+
+# fix spelling of RW-Stream to be same as trapping dataset
+metadata.sites2 <- metadata.sites %>%
+  mutate(Site = ifelse(SiteID == "RW-Stream", "RW-S", SiteID))
+
+## populate table for naive occupancy
+amph.naive.occ <- data.frame(Species = unique(c(amph$Traditional, amph$eDNA)),
+                             nsites.trad = NA, nsites.eDNA = NA, nsites.both = NA, 
+                             nsites.tot = NA, nsites.surv = NA)
+amph.naive.occ$Code <- c("LISY", "AMBY", "AMMA", "AMLA", "PSCR", "LISE", "LICL", "NOVI",
+                         "PLCI", "HESC", "LIPI", "EUBI")
+## loop through amphibian species and datasets
+for(sp in amph.naive.occ$Code) {
+  if(sp == "AMMA") {
+    # list of validation sites
+    sites <- metadata.sites2$Site[metadata.sites2$Trapping == "Yes" | 
+                                    metadata.sites2$Egg_mass_survey == "Yes"]
+    amph.naive.occ$nsites.surv[amph.naive.occ$Code == sp] <- length(sites)
+    
+    # sites where AMMA found with traditional methods (trapping or egg mass counts)
+    sites.trad <- na.omit(unique(c(as.character(traps$Site[traps$Species == sp]), 
+                                   as.character(metadata.sites2$Site[metadata.sites2$AMMA_eggs > 0]))))
+    amph.naive.occ$nsites.trad[amph.naive.occ$Code == sp] <- length(sites.trad)
+    
+    # validation sites where AMMA found with eDNA
+    sites.eDNA <- unique(amphibian.eDNA.val$Site[
+      amphibian.eDNA.val$Species == amph.naive.occ$Species[amph.naive.occ$Code == sp] &
+        amphibian.eDNA.val$Abundance > 0])
+    
+    amph.naive.occ$nsites.eDNA[amph.naive.occ$Code == sp] <- length(sites.eDNA)
+    
+    # sites where AMMA found with both methods
+    sites.both <- sites.trad[sites.trad %in% sites.eDNA]
+    amph.naive.occ$nsites.both[amph.naive.occ$Code == sp] <- sum(sites.trad %in% sites.eDNA)
+    
+    # sites where AMMA found with either method
+    amph.naive.occ$nsites.tot[amph.naive.occ$Code == sp] <- length(unique(c(sites.trad, sites.eDNA)))
+  } else if(sp == "LISY") {
+    # list of validation sites
+    sites <- metadata.sites2$Site[metadata.sites2$Trapping == "Yes"]
+    amph.naive.occ$nsites.surv[amph.naive.occ$Code == sp] <- length(sites)
+    
+    # sites where LISY found with traditional methods (trapping or egg mass counts)
+    sites.trad <- na.omit(unique(c(as.character(traps$Site[traps$Species == sp]), 
+                                   as.character(metadata.sites2$Site[metadata.sites2$LISY_eggs > 0]))))
+    amph.naive.occ$nsites.trad[amph.naive.occ$Code == sp] <- length(sites.trad)
+    
+    # validation sites where AMMA found with eDNA
+    sites.eDNA <- unique(amphibian.eDNA.val$Site[
+      amphibian.eDNA.val$Species == amph.naive.occ$Species[amph.naive.occ$Code == sp] &
+        amphibian.eDNA.val$Abundance > 0 & amphibian.eDNA.val$Trapping == "Yes"])
+      
+      amph.naive.occ$nsites.eDNA[amph.naive.occ$Code == sp] <- length(sites.eDNA)
+      
+      # sites where LISY found with both methods
+      sites.both <- sites.trad[sites.trad %in% sites.eDNA]
+      amph.naive.occ$nsites.both[amph.naive.occ$Code == sp] <- sum(sites.trad %in% sites.eDNA)
+      
+      # sites where LISY found with either method
+      amph.naive.occ$nsites.tot[amph.naive.occ$Code == sp] <- length(unique(c(sites.trad, sites.eDNA)))
+  } else {
+    # for all other species
+    # list of validation sites
+    sites <- metadata.sites2$Site[metadata.sites2$Trapping == "Yes"]
+    amph.naive.occ$nsites.surv[amph.naive.occ$Code == sp] <- length(sites)
+    
+    # sites where sp found with traditional methods (trapping or egg mass counts)
+    sites.trad <- na.omit(unique(as.character(traps$Site[traps$Species == sp])))
+    amph.naive.occ$nsites.trad[amph.naive.occ$Code == sp] <- length(sites.trad)
+    
+    # validation sites where sp found with eDNA
+    sites.eDNA <- unique(amphibian.eDNA.val$Site[
+      amphibian.eDNA.val$Species == amph.naive.occ$Species[amph.naive.occ$Code == sp] &
+        amphibian.eDNA.val$Abundance > 0 & amphibian.eDNA.val$Trapping == "Yes"])
+    
+    amph.naive.occ$nsites.eDNA[amph.naive.occ$Code == sp] <- length(sites.eDNA)
+    
+    # sites where sp found with both methods
+    sites.both <- sites.trad[sites.trad %in% sites.eDNA]
+    amph.naive.occ$nsites.both[amph.naive.occ$Code == sp] <- sum(sites.trad %in% sites.eDNA)
+    
+    # sites where sp found with either method
+    amph.naive.occ$nsites.tot[amph.naive.occ$Code == sp] <- length(unique(c(sites.trad, sites.eDNA)))
+  }
+}
+
+# bird and mammal data
+## populate table for naive occupancy
+birdmamm.naive.occ <- cameras.edna.combined.venn %>%
+  dplyr::group_by(Species, Site) %>%
+  dplyr::summarize(eDNA = makebinary(mean(Mean_reads)),
+                   cameras = makebinary(mean(Total.images))) %>%
+  ungroup() %>%
+  group_by(Species) %>%
+  dplyr::summarize(nsites.trad = length(unique(Site[cameras == 1])),
+            nsites.eDNA = length(unique(Site[eDNA == 1])),
+            nsites.both = length(unique(Site[cameras == 1 & eDNA == 1])),
+            nsites.tot = length(unique(Site[cameras == 1 | eDNA == 1])),
+            nsites.surv = 8) %>%
+  ungroup()
+
+# combine with bird and mammal data
+naive.occ.data <- data.frame(
+  Species = c(amph.naive.occ$Species, cameras.contr.tab$Species),
+  nsites_trad = c(amph.naive.occ$nsites.trad, cameras.contr.tab$n.sites.cameras),
+  nsites_eDNA = c(amph.naive.occ$nsites.eDNA, cameras.contr.tab$n.sites.eDNA),
+  nsites_surv = c(amph.naive.occ$nsites.surv, rep(8, nrow(cameras.contr.tab))),
+  Class = c(rep("Amphibia", nrow(amph.naive.occ)),
+            cameras.contr.tab$Class))
+naive.occ.data$nsites_trad_prop = naive.occ.data$nsites_trad/naive.occ.data$nsites_surv
+naive.occ.data$nsites_eDNA_prop = naive.occ.data$nsites_eDNA/naive.occ.data$nsites_surv
+
+# remove species not found in both surveys
+naive.occ.data.both <- naive.occ.data[naive.occ.data$nsites_trad > 0 & 
+                                        naive.occ.data$nsites_eDNA > 0,]
+
+occ.mod.list <- list()
+occ.mod.tab <- data.frame(Class = c("Amphibia", "Aves", "Mammalia"),
+                             Intercept = NA,
+                             slope = NA,
+                             SE = NA,
+                             p_val = NA,
+                             R2 = NA)
+# run models
+for(group in c("Amphibia", "Aves", "Mammalia")) {
+  mod <- glm(nsites_eDNA ~ nsites_trad,
+            naive.occ.data.both[naive.occ.data.both$Class == group,],
+            family = poisson)
+  # check for overdispersion
+  overdisp <- 1 - pchisq(deviance(mod), df.residual(mod))
+  print(paste(group, "overdispersion p =", round(overdisp,3), "(Pearson)"))
+  # if overdispersion, use poisson
+  if(overdisp < 0.05) {
+    mod <- glm(nsites_eDNA ~ nsites_trad,
+               naive.occ.data.both[naive.occ.data.both$Class == group,],
+               family = quasipoisson)
+  }
+  occ.mod.list[[group]] <- mod
+  occ.mod.tab[occ.mod.tab$Class == group,]$Intercept <- coef(mod)[[1]]
+  occ.mod.tab[occ.mod.tab$Class == group,]$slope <- coef(mod)[[2]]
+  occ.mod.tab[occ.mod.tab$Class == group,]$SE <- summary(mod)$coefficients[2,2]
+  occ.mod.tab[occ.mod.tab$Class == group,]$p_val <- summary(mod)$coefficients[2,4]
+  occ.mod.tab[occ.mod.tab$Class == group,]$R2 <- as.numeric(r2(mod))
+}
+
+# predict models
+occ.plot.data <- NULL
+vert.classes <- c("Amphibians" = "Amphibia", "Birds" = "Aves", "Mammals" = "Mammalia")
+for(group in c("Amphibia", "Aves", "Mammalia")) {
+  newdat <- data.frame(
+    nsites_trad = seq(1,max(naive.occ.data.both$nsites_trad[naive.occ.data.both$Class == group]),
+                      length.out = 30))
+  # predict on link scale to get appropriate CIs
+  preds <- as.data.frame(predict(mod.list[[group]],
+                                 newdata = newdat,
+                                 type = "link", 
+                                 se.fit = TRUE))
+  critval <- 1.96 ## approx 95% CI
+  upr <- occ.mod.list[[group]]$family$linkinv(preds$fit + (critval * preds$se.fit))
+  lwr <- occ.mod.list[[group]]$family$linkinv(preds$fit - (critval * preds$se.fit))
+  fit <- occ.mod.list[[group]]$family$linkinv(preds$fit) 
+  preds <- cbind(newdat,fit,lwr,upr)
+  preds$Group = names(vert.classes[vert.classes == group])
+  occ.plot.data <- bind_rows(occ.plot.data, preds)
+}
+  
+# plot relationship
+fig.lets.labs.class <- c("Amphibians" = "A      Amphibians", 
+                         "Birds" = "B      Birds", 
+                         "Mammals" = "C      Mammals")
+naive.occ.data.both <- naive.occ.data.both %>%
+  mutate(Group = ifelse(Class == "Amphibia", "Amphibians", 
+                        ifelse(Class == "Aves", "Birds", "Mammals")))
+(naive.occ.plot <- ggplot(occ.plot.data, aes(nsites_trad, fit)) +
+    geom_line() +
+    geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+    geom_point(data = naive.occ.data.both, aes(nsites_trad, nsites_eDNA),size = 3, fill = "black") +
+    facet_wrap(~Group, nrow = 1, scale = "free", labeller = as_labeller(fig.lets.labs.class)) +
+    theme_bw() + mythemes +
+    theme(panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(), 
+          panel.background = element_blank(),
+          strip.background = element_blank()) +
+  labs(x = "n sites (traditional)", y = "n sites (eDNA)"))
+
+ggsave("figures/trapping.validation.naive.occ.jpg", 
+       width = 8, height = 5, units = "in", dpi = 300)
+
+# 7b-3. Comparing species detection (naive richness) with either method in poisson GLM ----
+## get number of species detected from sites with trad vs eDNA (only from concurrent surveys!)
+### amphibians
+#### trapping
+amph.rich.trad <- traps %>%
+  filter(!is.na(Species %notin% c("LITH", "FISH", "CRAY"))) %>%
+  group_by(Site) %>%
+  # get number of species detected in each site with traditional methods
+  dplyr::summarize(Trapping = length(unique(Species))) %>%
+  mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
+  ungroup()
+#### eDNA
+amph.rich.edna <- ps.tax.samps.spp %>%
+  psmelt() %>%
+  # only include eDNA data from trapping sites taken concurrently with trapping
+  mutate(Date = as.Date(Date, format = "%m/%d/%Y"),
+         Site = ifelse(Site == "RW-Stream", "RW-S", Site)) %>%
+  filter(Class == "Amphibia" &
+           Date < "2023-05-05" &
+           Trapping == "Yes" &
+           Abundance > 0) %>%
+  group_by(Site) %>%
+  # get number of species detected in each site with eDNA
+  dplyr::summarize(eDNA = length(na.omit(unique(Species)))) %>%
+  mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
+  ungroup()
+##### combine together
+amph.rich.both <- left_join(amph.rich.trad, amph.rich.edna, by = "Site")
+amph.rich.both$Class <- "Amphibians"
+
+### birds
+bird.rich.trad <- cameras.edna.combined %>%
+  filter(Total.images > 0 & Class == "Aves") %>%
+  group_by(Site) %>%
+  dplyr::summarize(Trapping = length(na.omit(unique(Species))))%>%
+  ungroup()
+bird.rich.edna <- cameras.edna.combined %>%
+  filter(Mean_reads > 0 & Class == "Aves") %>%
+  group_by(Site) %>%
+  dplyr::summarize(eDNA = length(na.omit(unique(Species))))%>%
+  ungroup()
+bird.rich.both <- left_join(bird.rich.trad, bird.rich.edna, by = "Site")
+bird.rich.both$Class <- "Birds"
+
+### mammals
+mamm.rich.trad <- cameras.edna.combined %>%
+  filter(Total.images > 0 & Class == "Mammalia") %>%
+  group_by(Site) %>%
+  dplyr::summarize(Trapping = length(na.omit(unique(Species)))) %>%
+  ungroup()
+mamm.rich.edna <- cameras.edna.combined %>%
+  filter(Mean_reads > 0 & Class == "Mammalia") %>%
+  group_by(Site) %>%
+  dplyr::summarize(eDNA = length(na.omit(unique(Species)))) %>%
+  ungroup()
+mamm.rich.both <- left_join(mamm.rich.trad, mamm.rich.edna, by = "Site")
+mamm.rich.both$Class <- "Mammals"
+
+## combine all data
+verts.rich <- bind_rows(amph.rich.both,
+                        bird.rich.both,
+                        mamm.rich.both) %>%
+  mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
+  reshape2::melt(id.vars = c("Site", "Class"), variable.name = "Method", value.name = "S") %>%
+  mutate(Method = factor(Method, levels = c("Trapping", "eDNA")))
+  
+
+## run analysis (poisson GLM)
+rich.mod.list <- list()
+rich.mod.tab <- data.frame(Class = c("Amphibians", "Birds", "Mammals"),
+                           Intercept = NA,
+                           eDNA = NA,
+                           SE = NA,
+                           p_val = NA,
+                           R2 = NA)
+# run models
+for(group in c("Amphibians", "Birds", "Mammals")) {
+  mod <- glm(S ~ Method,
+             verts.rich[verts.rich$Class == group,],
+             family = poisson)
+  # check for overdispersion
+  overdisp <- 1 - pchisq(deviance(mod), df.residual(mod))
+  print(paste(group, "overdispersion p =", round(overdisp,3), "(Pearson)"))
+  # if overdispersion, use poisson
+  if(overdisp < 0.05) {
+    mod <- glm(S ~ Method,
+               verts.rich[verts.rich$Class == group,],
+               family = quasipoisson)
+  }
+  rich.mod.list[[group]] <- mod
+  rich.mod.tab[rich.mod.tab$Class == group,]$Intercept <- coef(mod)[[1]]
+  rich.mod.tab[rich.mod.tab$Class == group,]$eDNA <- coef(mod)[[2]]
+  rich.mod.tab[rich.mod.tab$Class == group,]$SE <- summary(mod)$coefficients[2,2]
+  rich.mod.tab[rich.mod.tab$Class == group,]$p_val <- summary(mod)$coefficients[2,4]
+  rich.mod.tab[rich.mod.tab$Class == group,]$R2 <- as.numeric(r2(mod))
+}
+  
+# predict models
+rich.plot.data <- NULL
+for(group in c("Amphibians", "Birds", "Mammals")) {
+  newdat <- data.frame(
+    Method = c("Trapping", "eDNA")
+  )
+  # predict on link scale to get appropriate CIs
+  preds <- as.data.frame(predict(rich.mod.list[[group]],
+                                 newdata = newdat,
+                                 type = "link", 
+                                 se.fit = TRUE))
+  critval <- 1.96 ## approx 95% CI
+  upr <- rich.mod.list[[group]]$family$linkinv(preds$fit + (critval * preds$se.fit))
+  lwr <- rich.mod.list[[group]]$family$linkinv(preds$fit - (critval * preds$se.fit))
+  fit <- rich.mod.list[[group]]$family$linkinv(preds$fit) 
+  preds <- cbind(newdat,fit,lwr,upr)
+  preds$Class <- group
+  rich.plot.data <- bind_rows(rich.plot.data, preds)
+}
+
+fig.lets.labs.class.2col <- c("Amphibians" = "D     Amphibians", 
+                         "Birds" = "E     Birds", 
+                         "Mammals" = "F     Mammals")
+# plot relationship
+rich.plot.data$Method <- factor(rich.plot.data$Method, levels = c("Trapping", "eDNA"))
+(naive.rich.plot <- ggplot(rich.plot.data, aes(Method, fit, shape = Method, fill = Method)) +
+  geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0) +
+  geom_point(size = 3) +
+  scale_fill_manual(values = col2[1:2]) +
+  scale_shape_manual(values = c(21,24)) +
+  facet_wrap(~Class, nrow = 1, scale = "free", labeller = as_labeller(fig.lets.labs.class.2col)) +
+  theme_bw() + mythemes +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(),
+        strip.background = element_blank(),
+        legend.position = "bottom") +
+  labs(x = "Method", y = "Richness"))
+
+ggsave("figures/trapping.validation.naive.rich.jpg", 
+       width = 8, height = 5, units = "in", dpi = 300)
+
+# combine naive occ and rich plots together
+ggarrange(naive.occ.plot + theme(plot.margin = unit(c(0,1,0,1), 'lines')),
+          NULL,
+          naive.rich.plot + theme(plot.margin = unit(c(0,1,0,1), 'lines')),
+          nrow = 3, align = "v", heights = c(0.8,0.05,1))
+
+ggsave("figures/trapping.validation.naive.combined.jpg", 
+       width = 9, height = 6, units = "in", dpi = 300)

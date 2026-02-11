@@ -756,12 +756,19 @@ final.tax.list$Species <- ifelse(is.na(final.tax.list$Species.y),
                                  final.tax.list$Species.y)
 # save the final assignments
 final.tax.list <- final.tax.list[,c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")]
+
+# rename species that are misassigned to native taxa containing identical DNA barcodes
+final.tax.list$Species[final.tax.list$Species %in% "Turdus cardis"] <- "Turdus migratorius"
+final.tax.list$Species[final.tax.list$Species %in% "Cyanopica cyanus koreensis"] <- "Cyanocitta cristata"
+
 saveRDS(final.tax.list, 'data/results/spp_assign_final_wetlands_2023.rsd') 
 
 # Examine species data prior to and after decontamination
+seqtab.nochim <- readRDS('data/results/seqtab_nochim.rds')
 spptab.nochim <- seqtab.nochim
 colnames(spptab.nochim) <- final.tax.list[,"Species"][match(colnames(spptab.nochim), 
                                                               rownames(final.tax.list))]
+seqtab.decontam <- readRDS('data/results/seqtab_decontam.rds')
 spptab.decontam <- seqtab.decontam
 colnames(spptab.decontam) <- final.tax.list[,"Species"][match(colnames(spptab.decontam), 
                                                               rownames(final.tax.list))]
@@ -781,12 +788,14 @@ taxa_names(ps.dat) <- paste0("Seq", seq(ntaxa(ps.dat)))
 ## create a phyloseq object with only field samples
 ps.dat.samps <- subset_samples(ps.dat, sample_type == "Sample")
 
-## create a principle component for water quality variables (Cond, DO, Sal, Temp, pH)
-pairs(data.frame(sample_data(ps.dat.samps)[,c(13,31,34,37,38)]))
-wetland.wq.pc <- prcomp(sample_data(ps.dat.samps)[,c(13,31,34,37,38)], center = TRUE, scale. = TRUE)
-summary(wetland.wq.pc) # first PC is < 0.4
-wetland.wq.pc
-
+## create a principle component for water quality variables
+wq.vars <- c("Depth_cm", "Cond_uS_cm", "ODO_mg_L", "Sal_psu", "SpCond_uS_cm", "Temp..C", "TDS_mg_L", "pH")
+pairs(data.frame(sample_data(ps.dat.samps)[,wq.vars.redced]))
+wq.vars.reduced <- c("Depth_cm", "Cond_uS_cm", "ODO_mg_L", "Temp..C","pH")
+wetland.wq.pc <- prcomp(sample_data(ps.dat.samps)[,wq.vars.reduced][
+  complete.cases(sample_data(ps.dat.samps)[,wq.vars.reduced])], center = TRUE, scale. = TRUE)
+summary(wetland.wq.pc) # first 2 PCs are 0.64 cumulative variance
+wetland.wq.pc # first PC is depth (+), conductivity (+), and ODO (+), # second PC is temp (-) and pH (-)
 
 # examine raw phyloseq objects
 ps.dat
@@ -823,14 +832,14 @@ for(level in c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Specie
 
 # melt table for plotting summary of assignment success for ASVs
 ## all sequences
-tax.assign.melt <- melt(tax.assign.props, 
-                        variable.name = "Level", 
-                        value.name = "Prop_ASVs") 
+tax.assign.melt <- reshape2::melt(tax.assign.props, 
+                                  variable.name = "Level", 
+                                  value.name = "Prop_ASVs") 
 
 ## verified sequences
-tax.assign.melt.valid <- melt(tax.assign.props.valid, 
-                              variable.name = "Level", 
-                              value.name = "Prop_ASVs_valid")
+tax.assign.melt.valid <- reshape2::melt(tax.assign.props.valid, 
+                                        variable.name = "Level", 
+                                        value.name = "Prop_ASVs_valid")
 
 tax.assign.melt$Prop_ASVs_valid <- tax.assign.melt.valid$Prop_ASVs_valid 
 tax.assign.melt <- tax.assign.melt[-1,]
@@ -877,13 +886,13 @@ for(level in c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Specie
 }
 
 # melt for plotting
-reads.assign.melt <- melt(reads.assign.props, 
-                          variable.name = "Level", 
-                          value.name = "Prop_reads")
+reads.assign.melt <- reshape2::melt(reads.assign.props, 
+                                    variable.name = "Level", 
+                                    value.name = "Prop_reads")
 
-reads.assign.melt.valid <- melt(reads.assign.props.valid, 
-                                variable.name = "Level", 
-                                value.name = "Prop_reads_valid") 
+reads.assign.melt.valid <- reshape2::melt(reads.assign.props.valid, 
+                                          variable.name = "Level", 
+                                          value.name = "Prop_reads_valid") 
 
 reads.assign.melt$Prop_reads_valid <- reads.assign.melt.valid$Prop_reads_valid
 reads.assign.melt <- reads.assign.melt[-1,]
@@ -933,8 +942,8 @@ min(reads.assign.correct, na.rm = T)
 
 # Contamination review
 Riaz.blanks <- metadata.runs$ReadFile_Name[metadata.runs$sample_type %in% c("Field blank", 
-                                                                              "Qiagen blank", 
-                                                                              "PCR blank")]
+                                                                            "Qiagen blank", 
+                                                                            "PCR blank")]
 View(spptab.nochim[Riaz.blanks,])
 
 ## prop of reads in raw data that were cow
